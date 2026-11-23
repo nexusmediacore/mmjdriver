@@ -148,7 +148,11 @@ export default function TripsShow({ trip, drivers, vehicles }: Props) {
 
     const formatDateTime = (value: string | null) => {
         if (!value) return null;
-        return new Date(value).toLocaleString('id-ID', { dateStyle: 'long', timeStyle: 'short' });
+        // Nilai waktu dari backend adalah waktu lokal (WIB) tanpa penanda
+        // zona. Normalisasi spasi ke 'T' agar selalu diparse sebagai waktu
+        // LOKAL browser — bukan UTC — sehingga jam tidak bergeser.
+        const normalized = value.includes('T') ? value : value.replace(' ', 'T');
+        return new Date(normalized).toLocaleString('id-ID', { dateStyle: 'long', timeStyle: 'short' });
     };
 
     const isDraft = trip.status === 'DRAFT';
@@ -239,7 +243,7 @@ export default function TripsShow({ trip, drivers, vehicles }: Props) {
                                         </>
                                     )}
                                     <InfoRow label="Keperluan" value={trip.purpose} />
-                                    <InfoRow label="Tanggal Perjalanan" value={trip.trip_date ? new Date(trip.trip_date).toLocaleDateString('id-ID', { dateStyle: 'full' }) : null} />
+                                    <InfoRow label="Tanggal Perjalanan" value={trip.trip_date ? new Date(`${trip.trip_date}T00:00:00`).toLocaleDateString('id-ID', { dateStyle: 'full' }) : null} />
                                     <InfoRow label="Jam Berangkat" value={formatDateTime(trip.departure_time)} />
                                     {trip.actual_return_time ? (
                                         <InfoRow
@@ -553,7 +557,11 @@ export default function TripsShow({ trip, drivers, vehicles }: Props) {
                                 >
                                     <option value="">Pilih Driver</option>
                                     {drivers
-                                        .filter((d) => d.status === 'STANDBY' || d.status === 'OFF_DUTY')
+                                        // Driver non-aktif disaring. Status ASSIGNED / ACCEPTED
+                                        // tetap ditampilkan: driver dengan trip terjadwal masih
+                                        // bisa dipilih selama jadwalnya tidak bentrok (divalidasi
+                                        // backend saat penugasan).
+                                        .filter((d) => !['SICK', 'LEAVE', 'OFF_DUTY', 'UNAVAILABLE'].includes(d.status))
                                         .map((d) => (
                                             <option key={d.id} value={d.id}>
                                                 {d.name} ({d.license_number})
@@ -576,9 +584,13 @@ export default function TripsShow({ trip, drivers, vehicles }: Props) {
                                         {drivers
                                             .filter(
                                                 (d) =>
+                                                    // Driver pendukung: bukan driver utama, tidak
+                                                    // sedang ON_TRIP, belum ditugaskan di trip ini,
+                                                    // dan bukan status tidak-bekerja.
                                                     d.willing_to_load &&
                                                     d.id !== selectedDriverId &&
                                                     d.status !== 'ON_TRIP' &&
+                                                    !['SICK', 'LEAVE', 'OFF_DUTY', 'UNAVAILABLE'].includes(d.status) &&
                                                     !trip.assigned_driver_ids.includes(d.id)
                                             )
                                             .map((d) => (

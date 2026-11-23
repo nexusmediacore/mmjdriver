@@ -69,6 +69,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Zona Waktu Tampilan (WIB)
+    |--------------------------------------------------------------------------
+    |
+    | Waktu yang diinput user (mis. jam keberangkatan) disimpan apa adanya
+    | sebagai waktu lokal WIB. Konfigurasi ini dipakai untuk menampilkan
+    | waktu tanpa pergeseran zona waktu (bug 13:00 tampil 20:00).
+    |
+    */
+
+    'timezone_display' => 'Asia/Jakarta',
+
+    /*
+    |--------------------------------------------------------------------------
     | Application Locale Configuration
     |--------------------------------------------------------------------------
     |

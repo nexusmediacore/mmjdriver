@@ -6,12 +6,8 @@ use App\Models\AuditLog;
 use App\Models\BeritaAcara;
 use App\Models\Department;
 use App\Models\Driver;
-use App\Models\DriverAttendance;
-use App\Models\DriverStatusLog;
-use App\Models\LoadingRequest;
 use App\Models\Role;
 use App\Models\Setting;
-use App\Models\TripAssignment;
 use App\Models\TripRequest;
 use App\Models\User;
 use App\Models\Vehicle;
@@ -711,60 +707,17 @@ class SectionController extends Controller
 
     public function destroyDriver(Driver $driver): RedirectResponse
     {
-        // Cegah penghapusan jika driver sedang dalam perjalanan aktif
-        if ($driver->isOnTrip() || in_array($driver->status, [Driver::STATUS_ON_TRIP, Driver::STATUS_RETURNING])) {
-            return redirect()->route('admin.drivers')->with(
-                'error',
-                "Driver {$driver->user?->name} sedang dalam perjalanan (status: {$driver->status}). Selesaikan atau batalkan perjalanan terlebih dahulu sebelum menghapus driver."
-            );
-        }
-
         DB::transaction(function () use ($driver) {
-            // 1. Catat AuditLog sebelum record driver dihapus
-            AuditLog::create([
-                'user_id' => Auth::id(),
-                'action' => 'DELETE_DRIVER',
-                'module' => 'Driver',
-                'record_type' => 'Driver',
-                'record_id' => $driver->id,
-                'old_value' => json_encode($driver->only([
-                    'user_id', 'license_number', 'vehicle_plate', 'vehicle_type',
-                    'phone', 'status', 'willing_to_load',
-                ])),
-                'new_value' => json_encode([]),
-                'ip_address' => request()->ip(),
-                'user_agent' => request()->userAgent(),
-            ]);
-
-            // 2. Lepaskan hubungan perizinan kendaraan (pivot driver_vehicle)
+            // Riwayat penugasan dipertahankan (driver_id menjadi NULL via FK SET NULL),
+            // relasi lain dilepas agar FK tidak menolak penghapusan.
+            $driver->loadingRequests()->update(['driver_id' => null]);
             $driver->allowedVehicles()->detach();
+            $driver->vehicles()->update(['primary_driver_id' => null]);
+            $driver->tripRequests()->update(['assigned_driver_id' => null]);
+            DB::table('berita_acaras')->where('driver_id', $driver->id)->update(['driver_id' => null]);
+            $driver->attendances()->delete();
+            $driver->statusLogs()->delete();
 
-            // 3. Bersihkan status driver utama pada kendaraan
-            Vehicle::where('primary_driver_id', $driver->id)->update(['primary_driver_id' => null]);
-
-            // 4. Update trip requests yang masih berstatus DRIVER_ASSIGNED atau DRIVER_ACCEPTED kembali ke APPROVED
-            TripRequest::where('assigned_driver_id', $driver->id)
-                ->whereIn('status', [TripRequest::STATUS_DRIVER_ASSIGNED, TripRequest::STATUS_DRIVER_ACCEPTED])
-                ->update([
-                    'status' => TripRequest::STATUS_APPROVED,
-                    'assigned_driver_id' => null,
-                ]);
-
-            // Untuk trip requests lainnya yang mengaitkan driver ini, nullify assigned_driver_id
-            TripRequest::where('assigned_driver_id', $driver->id)->update(['assigned_driver_id' => null]);
-
-            // 5. Bersihkan penugasan trip_assignments driver ini agar tidak melanggar foreign key constraint
-            TripAssignment::where('driver_id', $driver->id)->delete();
-
-            // 6. Nullify driver_id pada loading_requests dan berita_acaras
-            LoadingRequest::where('driver_id', $driver->id)->update(['driver_id' => null]);
-            BeritaAcara::where('driver_id', $driver->id)->update(['driver_id' => null]);
-
-            // 7. Bersihkan log status dan absensi driver
-            DriverStatusLog::where('driver_id', $driver->id)->delete();
-            DriverAttendance::where('driver_id', $driver->id)->delete();
-
-            // 8. Hapus record driver (akun user tetap ada dan dapat didaftarkan kembali jika dibutuhkan)
             $driver->delete();
         });
 

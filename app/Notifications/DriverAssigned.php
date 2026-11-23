@@ -3,6 +3,7 @@
 namespace App\Notifications;
 
 use App\Models\TripRequest;
+use Carbon\Carbon;
 use Illuminate\Bus\Queueable;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
@@ -31,10 +32,26 @@ class DriverAssigned extends Notification
             'trip_number' => $this->trip->trip_number,
             'message' => "Anda telah ditugaskan untuk perjalanan {$this->trip->trip_number} ke {$this->trip->destination}.",
             'destination' => $this->trip->destination,
-            'departure_time' => $this->trip->departure_time?->toDateTimeString(),
+            'departure_time' => $this->trip->departure_time
+                ? Carbon::parse($this->trip->departure_time)->format('Y-m-d H:i:s')
+                : null,
             'bod_link' => $this->trip->bod_link,
             'created_at' => now()->toDateTimeString(),
         ];
+    }
+
+    /**
+     * Format waktu lokal tanpa konversi zona waktu.
+     */
+    protected function formatDeparture($value): string
+    {
+        if (! $value) {
+            return '-';
+        }
+
+        return Carbon::parse($value)
+            ->timezone(config('app.timezone_display', 'Asia/Jakarta'))
+            ->format('d M Y H:i');
     }
 
     /**
@@ -50,7 +67,7 @@ class DriverAssigned extends Notification
             ->line('Anda ditugaskan untuk perjalanan berikut:')
             ->line('No. Trip: '.$trip->trip_number)
             ->line('Tujuan: '.($trip->destination ?: '-'))
-            ->line('Berangkat: '.($trip->departure_time?->format('d M Y H:i') ?? '-'))
+            ->line('Berangkat: '.$this->formatDeparture($trip->departure_time))
             ->line('Keperluan: '.mb_substr((string) $trip->purpose, 0, 200))
             ->action('Buka Aplikasi MMJ Driver', url('/login'))
             ->line('Jika WhatsApp aktif, pesan otomatis dikirim ke nomor terdaftar.')
@@ -70,8 +87,8 @@ class DriverAssigned extends Notification
         $lapar .= "No. Trip    : *{$trip->trip_number}*\n";
         $lapar .= 'Tujuan      : *'.($trip->destination ?: '-')."*\n";
         $lapar .= "Prioritas   : *{$trip->priority}*\n";
-        $lapar .= 'Berangkat   : '.($trip->departure_time?->format('d M Y H:i') ?? '-')."\n";
-        $lapar .= 'Estimasi    : '.($trip->estimated_return_time?->format('d M Y H:i') ?? '-')."\n";
+        $lapar .= 'Berangkat   : '.$this->formatDeparture($trip->departure_time)."\n";
+        $lapar .= 'Estimasi    : '.$this->formatDeparture($trip->estimated_return_time)."\n";
         $lapar .= "━━━━━━━━━━━━━━━━━━━━━\n";
 
         if (filled($trip->request_type ?? null) && $trip->request_type === TripRequest::TYPE_GUEST_PICKUP) {

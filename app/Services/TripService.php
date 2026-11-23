@@ -235,6 +235,92 @@ class TripService
     }
 
     /**
+     * Perbarui permintaan perjalanan. Hanya trip berstatus DRAFT yang boleh
+     * diedit. Penumpang & driver pendukung loading ikut disinkronkan.
+     */
+    public function updateTrip(TripRequest $trip, array $data, $user): TripRequest
+    {
+        if ($trip->status !== TripRequest::STATUS_DRAFT) {
+            throw new \Exception('Hanya permintaan berstatus Draft yang dapat diedit.');
+        }
+
+        return DB::transaction(function () use ($trip, $data, $user) {
+            $isSuperAdmin = $user->role?->name === 'SUPERADMIN';
+
+            $trip->update([
+                'request_type' => $data['request_type'] ?? $trip->request_type,
+                'department_id' => $isSuperAdmin
+                    ? ($data['department_id'] ?? $trip->department_id)
+                    : $trip->department_id,
+                'trip_date' => $data['trip_date'] ?? $trip->trip_date,
+                'departure_time' => $data['departure_time'],
+                'estimated_return_time' => $data['estimated_return_time'] ?? $trip->estimated_return_time,
+                'destination' => $data['destination'],
+                'destination_address' => $data['destination_address'] ?? null,
+                'guest_pickup_location' => $data['guest_pickup_location'] ?? null,
+                'guest_institution' => $data['guest_institution'] ?? null,
+                'cargo_pickup_location' => $data['cargo_pickup_location'] ?? null,
+                'cargo_description' => $data['cargo_description'] ?? null,
+                'purpose' => $data['purpose'],
+                'passenger_count' => $data['passenger_count'] ?? $trip->passenger_count,
+                'priority' => $isSuperAdmin
+                    ? ($data['priority'] ?? $trip->priority)
+                    : $trip->priority,
+                'requested_priority' => $data['requested_priority'] ?? null,
+                'urgency_notes' => $data['urgency_notes'] ?? null,
+                'requires_loading_assistance' => $data['requires_loading_assistance'] ?? false,
+                'notes' => $data['notes'] ?? null,
+                'bod_link' => $data['bod_link'] ?? $trip->bod_link,
+                'updated_by' => $user->id,
+            ]);
+
+            // Sinkronkan ulang daftar penumpang.
+            if (array_key_exists('passengers', $data)) {
+                $trip->passengers()->delete();
+
+                foreach ($data['passengers'] ?? [] as $passengerData) {
+                    $trip->passengers()->create($passengerData);
+                }
+            }
+
+            // Sinkronkan driver pendukung loading.
+            $supportDriverIds = collect($data['loading_support_driver_ids'] ?? [])
+                ->map(fn ($id) => (int) $id)
+                ->filter()
+                ->unique()
+                ->values();
+
+            $trip->assignments()
+                ->where('role', TripAssignment::ROLE_LOADING_SUPPORT)
+                ->delete();
+
+            $trip->loadingRequests()->delete();
+
+            if ($supportDriverIds->isNotEmpty()) {
+                $this->assignLoadingSupportDrivers($trip, $supportDriverIds->all(), $user);
+            }
+
+            AuditLog::create([
+                'user_id' => $user->id,
+                'action' => 'UPDATE_TRIP',
+                'module' => 'TripRequest',
+                'record_type' => 'TripRequest',
+                'record_id' => $trip->id,
+                'old_value' => json_encode(['status' => $trip->getOriginal('status')]),
+                'new_value' => json_encode([
+                    'destination' => $trip->destination,
+                    'departure_time' => (string) $trip->departure_time,
+                    'passenger_count' => $trip->passenger_count,
+                ]),
+                'ip_address' => request()->ip(),
+                'user_agent' => request()->userAgent(),
+            ]);
+
+            return $trip->fresh();
+        });
+    }
+
+    /**
      * Notify superadmin when a trip is created from a department.
      */
     public function notifySuperadminOnTripCreation(TripRequest $trip): void
@@ -518,7 +604,7 @@ class TripService
      */
     protected function buildBodTripMessage(TripRequest $trip, Driver $driver): string
     {
-        $fmt = fn ($value) => $value ? Carbon::parse($value)->format('d M Y H:i') : '-';
+        $fmt = fn ($value) => $value ? Carbon::parse($value)->timezone(config('app.timezone_display', 'Asia/Jakarta'))->format('d M Y H:i') : '-';
 
         $message = "━━━━━━━━━━━━━━━━━━━━━\n"
             ."*TUGASAN TRIP (BOD)*\n"
@@ -821,22 +907,17 @@ class TripService
     }
 
     /**
-     * Status driver setelah penugasan.
-     *
-     * Trip yang jadwalnya masih di masa depan TIDAK mengubah status driver —
-     * driver tetap STANDBY dan masih bisa menerima tugas lain di hari berjalan
-     * (bentrok jadwal tetap dicek dari tabel trip_assignments).
-     */
-    /**
      * Status driver setelah ditugaskan.
      *
-     * Driver yang sudah ditugaskan SELALU berstatus ASSIGNED (ditugaskan) —
-     * tidak boleh lagi tampak STANDBY. Status baru berubah menjadi ON_TRIP
-     * (sedang bertugas) ketika driver benar-benar memulai perjalanan.
+     * Driver yang ditugaskan tetap berstatus STANDBY selama perjalanan belum
+     * dimulai — driver masih dapat dipilih untuk trip lain (konflik jadwal
+     * tetap dicek dari tabel trip_assignments). Status baru berubah menjadi
+     * ON_TRIP (sedang bertugas) tepat saat driver memulai perjalanan
+     * (Start Trip), dan kembali STANDBY setelah perjalanan selesai.
      */
     protected function driverStatusAfterAssignment(TripRequest $trip): string
     {
-        return Driver::STATUS_ASSIGNED;
+        return Driver::STATUS_STANDBY;
     }
 
     /**
@@ -965,8 +1046,9 @@ class TripService
                     'driver_accepted_at' => now(),
                 ]);
 
-                // Driver yang sudah menerima penugasan berstatus ACCEPTED.
-                $this->syncDriverStatus($driver, Driver::STATUS_ACCEPTED, 'ASSIGNED', $user);
+                // Driver yang menerima penugasan tetap STANDBY selama
+                // perjalanan belum dimulai (status ON_TRIP baru saat Start Trip).
+                $this->syncDriverStatus($driver, Driver::STATUS_STANDBY, $driver->getOriginal('status'), $user);
 
                 AuditLog::create([
                     'user_id' => $user->id,

@@ -137,8 +137,9 @@ class DriverStatusAfterCompleteTest extends TestCase
 
         $this->assertSame(TripRequest::STATUS_DRIVER_ASSIGNED, $newTrip->fresh()->status);
 
-        // Driver yang ditugaskan langsung ASSIGNED, apapun jadwal tripnya.
-        $this->assertSame(Driver::STATUS_ASSIGNED, $driver->fresh()->status);
+        // Driver yang ditugaskan ke trip terjadwal tetap STANDBY sampai
+        // Start Trip (perilaku baru).
+        $this->assertSame(Driver::STATUS_STANDBY, $driver->fresh()->status);
     }
 
     public function test_inactive_driver_keeps_status_after_complete(): void

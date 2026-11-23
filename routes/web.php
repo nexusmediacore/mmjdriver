@@ -30,6 +30,8 @@ Route::middleware('auth')->group(function () {
     // Trip Routes
     Route::get('/trips', [TripController::class, 'index'])->name('trips.index');
     Route::get('/trips/create', [TripController::class, 'create'])->name('trips.create');
+    Route::get('/trips/{trip}/edit', [TripController::class, 'edit'])->name('trips.edit');
+    Route::put('/trips/{trip}', [TripController::class, 'update'])->name('trips.update');
     Route::post('/trips', [TripController::class, 'store'])->name('trips.store');
     Route::get('/trips/{trip}', [TripController::class, 'show'])->name('trips.show');
     Route::post('/trips/{trip}/submit', [TripController::class, 'submit'])->name('trips.submit');

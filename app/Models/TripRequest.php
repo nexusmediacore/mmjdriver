@@ -105,13 +105,17 @@ class TripRequest extends Model
 
     protected $casts = [
         'trip_date' => 'date',
-        'departure_time' => 'datetime',
-        'estimated_return_time' => 'datetime',
+        // Waktu perjalanan disimpan apa adanya (waktu lokal WIB yang diinput
+        // user). Tanpa cast datetime agar tidak ada konversi zona waktu yang
+        // menggeser jam (bug 13:00 tampil 20:00).
+        'departure_time' => 'string',
+        'estimated_return_time' => 'string',
         'requires_loading_assistance' => 'boolean',
         'approved_at' => 'datetime',
         'started_at' => 'datetime',
         'completed_at' => 'datetime',
-        'actual_return_time' => 'datetime',
+        // Sama seperti di atas: tanpa konversi zona waktu.
+        'actual_return_time' => 'string',
         'completion_submitted_at' => 'datetime',
         'completion_approved_at' => 'datetime',
     ];

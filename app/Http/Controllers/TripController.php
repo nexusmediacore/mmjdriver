@@ -12,12 +12,14 @@ use App\Http\Requests\StoreTripRequest;
 use App\Http\Requests\SubmitTripCompletionRequest;
 use App\Models\Department;
 use App\Models\Driver;
+use App\Models\TripAssignment;
 use App\Models\TripRequest;
 use App\Models\User;
 use App\Models\Vehicle;
 use App\Notifications\DriverAssigned;
 use App\Services\TripService;
 use App\Services\WhatsAppService;
+use Carbon\Carbon;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -84,7 +86,10 @@ class TripController extends Controller
                     'trip_number' => $trip->trip_number,
                     'destination' => $trip->destination,
                     'purpose' => $trip->purpose,
-                    'departure_time' => $trip->departure_time?->toISOString(),
+                    // Datetime lokal "Y-m-d H:i:s" — tanpa konversi zona waktu.
+                    'departure_time' => $trip->departure_time
+                        ? Carbon::parse($trip->departure_time)->format('Y-m-d H:i:s')
+                        : null,
                     'status' => $trip->status,
                     'priority' => $trip->priority,
                     'request_type' => $trip->request_type,
@@ -132,6 +137,89 @@ class TripController extends Controller
                 'driver_ids' => $v->authorizedDrivers->pluck('id')->toArray(),
             ]),
         ]);
+    }
+
+    /**
+     * Form edit permintaan perjalanan. Hanya trip berstatus DRAFT yang
+     * dapat diedit.
+     */
+    public function edit(TripRequest $trip): Response
+    {
+        $this->authorize('update', $trip);
+
+        if ($trip->status !== TripRequest::STATUS_DRAFT) {
+            abort(403, 'Hanya permintaan berstatus Draft yang dapat diedit.');
+        }
+
+        $user = Auth::user();
+
+        $drivers = Driver::with(['user', 'allowedVehicles'])->get();
+
+        return Inertia::render('Trips/Edit', [
+            'trip' => [
+                'id' => $trip->id,
+                'request_type' => $trip->request_type,
+                'department_id' => $trip->department_id,
+                'destination' => $trip->destination,
+                'destination_address' => $trip->destination_address,
+                'guest_pickup_location' => $trip->guest_pickup_location,
+                'guest_institution' => $trip->guest_institution,
+                'cargo_pickup_location' => $trip->cargo_pickup_location,
+                'cargo_description' => $trip->cargo_description,
+                'purpose' => $trip->purpose,
+                'trip_date' => $trip->trip_date?->toDateString(),
+                // Format datetime-local: Y-m-d\TH:i (waktu lokal, tanpa
+                // konversi zona waktu).
+                'departure_time' => $trip->departure_time
+                    ? Carbon::parse($trip->departure_time)->format('Y-m-d\TH:i')
+                    : '',
+                'passenger_count' => $trip->passenger_count,
+                'priority' => $trip->priority,
+                'requested_priority' => $trip->requested_priority,
+                'urgency_notes' => $trip->urgency_notes,
+                'requires_loading_assistance' => $trip->requires_loading_assistance,
+                'notes' => $trip->notes,
+                'bod_link' => $trip->bod_link,
+                'passengers' => $trip->passengers->map(fn ($p) => [
+                    'name' => $p->name,
+                    'phone' => $p->phone,
+                    'department' => $p->department,
+                    'position' => $p->position,
+                ])->toArray(),
+                'loading_support_driver_ids' => $trip->assignments()
+                    ->where('role', TripAssignment::ROLE_LOADING_SUPPORT)
+                    ->pluck('driver_id')
+                    ->toArray(),
+            ],
+            'drivers' => $drivers->map(fn ($d) => [
+                'id' => $d->id,
+                'name' => $d->user->name,
+                'status' => $d->status,
+                'willing_to_load' => $d->willing_to_load,
+                'vehicle_ids' => $d->allowedVehicles->pluck('id')->toArray(),
+            ]),
+        ]);
+    }
+
+    /**
+     * Simpan perubahan permintaan perjalanan (hanya saat DRAFT).
+     */
+    public function update(StoreTripRequest $request, TripRequest $trip): RedirectResponse
+    {
+        $this->authorize('update', $trip);
+
+        if ($trip->status !== TripRequest::STATUS_DRAFT) {
+            return back()->with('error', 'Hanya permintaan berstatus Draft yang dapat diedit.');
+        }
+
+        try {
+            $this->tripService->updateTrip($trip, $request->validated(), Auth::user());
+
+            return redirect()->route('trips.show', $trip)
+                ->with('success', 'Permintaan perjalanan berhasil diperbarui.');
+        } catch (\Exception $e) {
+            return back()->withInput()->with('error', $e->getMessage());
+        }
     }
 
     public function store(StoreTripRequest $request): RedirectResponse
@@ -194,9 +282,15 @@ class TripController extends Controller
                 'is_bod' => $trip->isBodTrip(),
                 'destination_address' => $trip->destination_address,
                 'purpose' => $trip->purpose,
-                'trip_date' => $trip->trip_date,
-                'departure_time' => $trip->departure_time?->toIso8601String(),
-                'actual_return_time' => $trip->actual_return_time?->toIso8601String(),
+                'trip_date' => $trip->trip_date?->toDateString(),
+                // Datetime lokal "Y-m-d H:i:s" — frontend memparse sebagai
+                // waktu lokal (bukan UTC) sehingga jam tidak bergeser.
+                'departure_time' => $trip->departure_time
+                    ? Carbon::parse($trip->departure_time)->format('Y-m-d H:i:s')
+                    : null,
+                'actual_return_time' => $trip->actual_return_time
+                    ? Carbon::parse($trip->actual_return_time)->format('Y-m-d H:i:s')
+                    : null,
                 'passenger_count' => $trip->passenger_count,
                 'priority' => $trip->priority,
                 'requested_priority' => $trip->requested_priority,

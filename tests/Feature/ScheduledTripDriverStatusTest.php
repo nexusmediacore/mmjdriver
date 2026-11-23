@@ -83,9 +83,9 @@ class ScheduledTripDriverStatusTest extends TestCase
         $this->assertSame($driver->id, $trip->assigned_driver_id);
         $this->assertNotNull($trip->assignment);
 
-        // Driver yang sudah ditugaskan langsung ASSIGNED (bukan STANDBY),
-        // apapun jadwal tripnya.
-        $this->assertSame(Driver::STATUS_ASSIGNED, $driver->fresh()->status);
+        // Driver yang sudah ditugaskan tetap STANDBY sampai Start Trip
+        // (perilaku baru — masih selectable untuk trip lain).
+        $this->assertSame(Driver::STATUS_STANDBY, $driver->fresh()->status);
     }
 
     public function test_driver_becomes_accepted_after_accepting_future_trip(): void
@@ -98,8 +98,8 @@ class ScheduledTripDriverStatusTest extends TestCase
         $trip->refresh();
         $this->assertSame(TripRequest::STATUS_DRIVER_ACCEPTED, $trip->status);
 
-        // Driver yang menerima penugasan berstatus ACCEPTED.
-        $this->assertSame(Driver::STATUS_ACCEPTED, $driver->fresh()->status);
+        // Driver yang menerima penugasan tetap STANDBY sampai Start Trip.
+        $this->assertSame(Driver::STATUS_STANDBY, $driver->fresh()->status);
     }
 
     public function test_driver_becomes_assigned_for_trip_departing_today(): void
@@ -130,8 +130,8 @@ class ScheduledTripDriverStatusTest extends TestCase
                 'vehicle_id' => $vehicle->id,
             ]);
 
-        // Hari H -> driver langsung ASSIGNED
-        $this->assertSame(Driver::STATUS_ASSIGNED, $driver->fresh()->status);
+        // Hari H pun driver tetap STANDBY sampai Start Trip.
+        $this->assertSame(Driver::STATUS_STANDBY, $driver->fresh()->status);
     }
 
     public function test_driver_accepting_trip_today_becomes_accepted(): void
@@ -159,7 +159,7 @@ class ScheduledTripDriverStatusTest extends TestCase
 
         $this->actingAs($driver->user)->post(route('trips.driver-response', $trip->id), ['action' => 'accept']);
 
-        $this->assertSame(Driver::STATUS_ACCEPTED, $driver->fresh()->status);
+        $this->assertSame(Driver::STATUS_STANDBY, $driver->fresh()->status);
     }
 
     public function test_same_driver_can_be_assigned_to_another_future_trip_on_a_different_day(): void
@@ -225,11 +225,10 @@ class ScheduledTripDriverStatusTest extends TestCase
             ]);
 
         // Konflik terdeteksi dari tabel trip_assignments (bukan kolom driver.status)
-        // sehingga trip kedua gagal ditugaskan. Status driver tetap ASSIGNED
-        // dari penugasan trip pertama.
+        // sehingga trip kedua gagal ditugaskan. Driver tetap STANDBY.
         $this->assertSame(TripRequest::STATUS_WAITING_DRIVER, $sameDay->fresh()->status);
         $this->assertNull($sameDay->fresh()->assignment);
-        $this->assertSame(Driver::STATUS_ASSIGNED, $driver->fresh()->status);
+        $this->assertSame(Driver::STATUS_STANDBY, $driver->fresh()->status);
     }
 
     public function test_activation_command_promotes_due_trip_and_driver(): void
@@ -255,12 +254,9 @@ class ScheduledTripDriverStatusTest extends TestCase
         $trip->refresh();
         $this->assertSame(TripRequest::STATUS_READY_TO_DEPART, $trip->status);
 
-        // Status driver sudah disesuaikan ke status aktif (ACCEPTED/ASSIGNED)
-        // oleh aktivasi otomatis — bukan lagi STANDBY.
-        $this->assertContains(
-            $driver->fresh()->status,
-            [Driver::STATUS_ACCEPTED, Driver::STATUS_ASSIGNED]
-        );
+        // Trip terangkat READY_TO_DEPART, tetapi driver tetap STANDBY —
+        // status baru menjadi ON_TRIP tepat saat Start Trip.
+        $this->assertSame(Driver::STATUS_STANDBY, $driver->fresh()->status);
 
         // Log status tercatat
         $this->assertDatabaseHas('trip_status_logs', [

@@ -29,7 +29,9 @@ class StoreTripRequest extends FormRequest
             // Hanya skema http/https agar aman dari XSS & skema berbahaya.
             'bod_link' => ['nullable', 'string', 'max:2048', 'url:http,https'],
             'purpose' => 'required|string',
-            'departure_time' => 'required|date|after_or_equal:now',
+            // Tanpa konversi zona waktu: nilai disimpan apa adanya sebagai
+            // waktu lokal (WIB) yang diinput user.
+            'departure_time' => ['required', 'date', 'after_or_equal:now'],
             'estimated_return_time' => 'nullable|date|after:departure_time',
             'trip_date' => 'nullable|date',
             'passenger_count' => 'required|integer|min:1|max:50',

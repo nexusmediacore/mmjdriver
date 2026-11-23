@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Driver\DriverApi;
 use App\Models\TripAssignment;
 use App\Models\TripRequest;
 use App\Services\TripService;
+use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -54,8 +55,12 @@ class DriverTaskController extends Controller
             'status' => $t->status,
             'purpose' => $t->purpose,
             'destination' => $t->destination,
-            'departure_time' => $t->departure_time?->toIso8601String(),
-            'estimated_return_time' => $t->estimated_return_time?->toIso8601String(),
+            'departure_time' => $t->departure_time
+                ? Carbon::parse($t->departure_time)->format('Y-m-d H:i:s')
+                : null,
+            'estimated_return_time' => $t->estimated_return_time
+                ? Carbon::parse($t->estimated_return_time)->format('Y-m-d H:i:s')
+                : null,
             'actual_departure_time' => $t->actual_departure_time?->toIso8601String(),
             'actual_return_time' => $t->actual_return_time?->toIso8601String(),
             'request_type' => $t->request_type,

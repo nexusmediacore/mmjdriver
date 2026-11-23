@@ -20,8 +20,9 @@ use Illuminate\Support\Facades\Log;
  *   DRIVER_ASSIGNED     -> READY_TO_DEPART
  *   DRIVER_ACCEPTED     -> READY_TO_DEPART
  *
- * dan menyesuaikan status driver ke ASSIGNED/ACCEPTED bila trip berjalan
- * pada hari itu.
+ * Status DRIVER tetap STANDBY selama perjalanan belum dimulai — driver masih
+ * bisa dipilih untuk trip lain. Status baru menjadi ON_TRIP tepat saat
+ * driver memulai perjalanan (Start Trip).
  */
 class DriverScheduleService
 {
@@ -112,14 +113,19 @@ class DriverScheduleService
                 continue;
             }
 
-            $target = match ($activeTrip->status) {
-                TripRequest::STATUS_ON_TRIP, TripRequest::STATUS_COMPLETION_SUBMITTED => Driver::STATUS_ON_TRIP,
-                TripRequest::STATUS_READY_TO_DEPART => in_array($activeTrip->assignment?->driver_response, ['ACCEPTED'], true)
-                    ? Driver::STATUS_ACCEPTED
-                    : Driver::STATUS_ASSIGNED,
-                TripRequest::STATUS_DRIVER_ACCEPTED => Driver::STATUS_ACCEPTED,
-                default => Driver::STATUS_ASSIGNED,
-            };
+            // Trip yang belum dimulai (READY_TO_DEPART / DRIVER_ACCEPTED)
+            // tidak mengubah status driver — tetap STANDBY sampai Start Trip.
+            if (! in_array($activeTrip->status, [TripRequest::STATUS_ON_TRIP, TripRequest::STATUS_COMPLETION_SUBMITTED], true)) {
+                // Pastikan status tidak menempel di ASSIGNED/ACCEPTED lama.
+                if (in_array($driver->status, [Driver::STATUS_ASSIGNED, Driver::STATUS_ACCEPTED], true)) {
+                    $this->changeStatus($driver, Driver::STATUS_STANDBY);
+                    $updated++;
+                }
+
+                continue;
+            }
+
+            $target = Driver::STATUS_ON_TRIP;
 
             if ($driver->status !== $target) {
                 $this->changeStatus($driver, $target);
@@ -144,6 +150,8 @@ class DriverScheduleService
                 continue;
             }
 
+            // Trip yang belum dimulai tidak mengubah status driver — tetap
+            // STANDBY sampai Start Trip.
             $hasStartedTrip = TripRequest::where(function ($query) use ($driver) {
                 $query->where('assigned_driver_id', $driver->id)
                     ->orWhereHas('assignments', fn ($q) => $q->where('driver_id', $driver->id));
@@ -151,13 +159,16 @@ class DriverScheduleService
                 ->whereIn('status', [TripRequest::STATUS_ON_TRIP, TripRequest::STATUS_COMPLETION_SUBMITTED])
                 ->exists();
 
-            if ($hasStartedTrip) {
+            if (! $hasStartedTrip) {
+                if (in_array($driver->status, [Driver::STATUS_ASSIGNED, Driver::STATUS_ACCEPTED], true)) {
+                    $this->changeStatus($driver, Driver::STATUS_STANDBY);
+                    $count++;
+                }
+
                 continue;
             }
 
-            $target = $trip->status === TripRequest::STATUS_READY_TO_DEPART
-                ? Driver::STATUS_ACCEPTED
-                : Driver::STATUS_ASSIGNED;
+            $target = Driver::STATUS_ON_TRIP;
 
             if ($driver->status !== $target) {
                 $this->changeStatus($driver, $target);
