@@ -6,8 +6,12 @@ use App\Models\AuditLog;
 use App\Models\BeritaAcara;
 use App\Models\Department;
 use App\Models\Driver;
+use App\Models\DriverAttendance;
+use App\Models\DriverStatusLog;
+use App\Models\LoadingRequest;
 use App\Models\Role;
 use App\Models\Setting;
+use App\Models\TripAssignment;
 use App\Models\TripRequest;
 use App\Models\User;
 use App\Models\Vehicle;
@@ -18,6 +22,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -706,7 +711,62 @@ class SectionController extends Controller
 
     public function destroyDriver(Driver $driver): RedirectResponse
     {
-        $driver->delete();
+        // Cegah penghapusan jika driver sedang dalam perjalanan aktif
+        if ($driver->isOnTrip() || in_array($driver->status, [Driver::STATUS_ON_TRIP, Driver::STATUS_RETURNING])) {
+            return redirect()->route('admin.drivers')->with(
+                'error',
+                "Driver {$driver->user?->name} sedang dalam perjalanan (status: {$driver->status}). Selesaikan atau batalkan perjalanan terlebih dahulu sebelum menghapus driver."
+            );
+        }
+
+        DB::transaction(function () use ($driver) {
+            // 1. Catat AuditLog sebelum record driver dihapus
+            AuditLog::create([
+                'user_id' => Auth::id(),
+                'action' => 'DELETE_DRIVER',
+                'module' => 'Driver',
+                'record_type' => 'Driver',
+                'record_id' => $driver->id,
+                'old_value' => json_encode($driver->only([
+                    'user_id', 'license_number', 'vehicle_plate', 'vehicle_type',
+                    'phone', 'status', 'willing_to_load',
+                ])),
+                'new_value' => json_encode([]),
+                'ip_address' => request()->ip(),
+                'user_agent' => request()->userAgent(),
+            ]);
+
+            // 2. Lepaskan hubungan perizinan kendaraan (pivot driver_vehicle)
+            $driver->allowedVehicles()->detach();
+
+            // 3. Bersihkan status driver utama pada kendaraan
+            Vehicle::where('primary_driver_id', $driver->id)->update(['primary_driver_id' => null]);
+
+            // 4. Update trip requests yang masih berstatus DRIVER_ASSIGNED atau DRIVER_ACCEPTED kembali ke APPROVED
+            TripRequest::where('assigned_driver_id', $driver->id)
+                ->whereIn('status', [TripRequest::STATUS_DRIVER_ASSIGNED, TripRequest::STATUS_DRIVER_ACCEPTED])
+                ->update([
+                    'status' => TripRequest::STATUS_APPROVED,
+                    'assigned_driver_id' => null,
+                ]);
+
+            // Untuk trip requests lainnya yang mengaitkan driver ini, nullify assigned_driver_id
+            TripRequest::where('assigned_driver_id', $driver->id)->update(['assigned_driver_id' => null]);
+
+            // 5. Bersihkan penugasan trip_assignments driver ini agar tidak melanggar foreign key constraint
+            TripAssignment::where('driver_id', $driver->id)->delete();
+
+            // 6. Nullify driver_id pada loading_requests dan berita_acaras
+            LoadingRequest::where('driver_id', $driver->id)->update(['driver_id' => null]);
+            BeritaAcara::where('driver_id', $driver->id)->update(['driver_id' => null]);
+
+            // 7. Bersihkan log status dan absensi driver
+            DriverStatusLog::where('driver_id', $driver->id)->delete();
+            DriverAttendance::where('driver_id', $driver->id)->delete();
+
+            // 8. Hapus record driver (akun user tetap ada dan dapat didaftarkan kembali jika dibutuhkan)
+            $driver->delete();
+        });
 
         return redirect()->route('admin.drivers')->with('success', 'Driver berhasil dihapus.');
     }
@@ -757,6 +817,34 @@ class SectionController extends Controller
 
     public function destroyVehicle(Vehicle $vehicle): RedirectResponse
     {
+        // Trip assignment memakai FK onDelete('restrict') terhadap vehicles,
+        // sehingga penghapusan akan menabrak constraint integritas data.
+        $assignmentCount = $vehicle->tripAssignments()->count();
+        $tripCount = $vehicle->tripRequests()->count();
+
+        if ($assignmentCount > 0 || $tripCount > 0) {
+            return redirect()->route('admin.vehicles')->with(
+                'error',
+                "Kendaraan tidak dapat dihapus karena masih memiliki {$tripCount} trip request dan {$assignmentCount} penugasan perjalanan. "
+                    .'Nonaktifkan kendaraan (status OUT_OF_SERVICE) bila tidak lagi digunakan.'
+            );
+        }
+
+        AuditLog::create([
+            'user_id' => Auth::id(),
+            'action' => 'DELETE_VEHICLE',
+            'module' => 'Vehicle',
+            'record_type' => 'Vehicle',
+            'record_id' => $vehicle->id,
+            'old_value' => json_encode($vehicle->only([
+                'plate_number', 'brand', 'model', 'type', 'year',
+                'passenger_capacity', 'status', 'primary_driver_id', 'notes',
+            ])),
+            'new_value' => json_encode([]),
+            'ip_address' => request()->ip(),
+            'user_agent' => request()->userAgent(),
+        ]);
+
         $vehicle->delete();
 
         return redirect()->route('admin.vehicles')->with('success', 'Kendaraan berhasil dihapus.');

@@ -85,9 +85,12 @@ export default function DataTableWithActions<T extends Record<string, any>>({
     };
 
     const handleDelete = (row: T) => {
-        if (confirm(`Hapus ${resourceName} ini?`)) {
+        const identifier = row.name || row.plate_number || row.code || '';
+        const message = identifier ? `Hapus ${resourceName} "${identifier}"?` : `Hapus ${resourceName} ini?`;
+        if (confirm(message)) {
             router.delete(deleteRoute(row), {
                 preserveState: false,
+                preserveScroll: true,
             });
         }
     };

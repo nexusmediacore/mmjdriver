@@ -1,5 +1,5 @@
 import { Head, Link, router, usePage } from '@inertiajs/react';
-import { PlusIcon, ClipboardDocumentListIcon, ArrowsUpDownIcon } from '@heroicons/react/24/outline';
+import { PlusIcon, ClipboardDocumentListIcon, ArrowsUpDownIcon, TrashIcon } from '@heroicons/react/24/outline';
 import { useState } from 'react';
 import SectionPage from '@/Components/SectionPage';
 import StatusBadge from '@/Components/UI/StatusBadge';
@@ -17,7 +17,8 @@ interface Trip {
     status: string;
     priority: string;
     request_type: string;
-    requestor: { name: string };
+    requestor_id: number;
+    requestor: { id: number; name: string } | null;
 }
 
 interface PaginationData {
@@ -50,8 +51,15 @@ const sortOptions = [
 ];
 
 export default function TripsIndex({ trips, sort_by = 'created_at', sort_dir = 'desc' }: Props) {
-    const user = usePage().props.auth.user as { role?: { name: string } | null } | null;
+    const user = usePage().props.auth.user as { id: number; role?: { name: string } | null } | null;
     const isSuperAdmin = user?.role?.name === 'SUPERADMIN';
+    const isAdmin = ['SUPERADMIN', 'ADMIN'].includes(user?.role?.name ?? '');
+    const canDelete = (trip: Trip) =>
+        isAdmin || (
+            ['EMPLOYEE', 'SUPERADMIN'].includes(user?.role?.name ?? '') &&
+            trip.requestor_id === user?.id &&
+            trip.status === 'DRAFT'
+        );
     const [sortBy, setSortBy] = useState(sort_by ?? 'created_at');
     const [sortDir, setSortDir] = useState(sort_dir === 'asc' ? 'asc' : 'desc');
 
@@ -169,13 +177,29 @@ export default function TripsIndex({ trips, sort_by = 'created_at', sort_dir = '
                                             </span>
                                         </td>
                                         <td className="text-center">
-                                            <Link
-                                                href={route('trips.show', trip.id)}
-                                                className="inline-flex items-center gap-1 text-sm font-semibold text-[#2563EB] transition hover:text-[#1D4ED8]"
-                                            >
-                                                Lihat
-                                                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" /></svg>
-                                            </Link>
+                                            <div className="inline-flex items-center gap-2">
+                                                <Link
+                                                    href={route('trips.show', trip.id)}
+                                                    className="inline-flex items-center gap-1 text-sm font-semibold text-[#2563EB] transition hover:text-[#1D4ED8]"
+                                                >
+                                                    Lihat
+                                                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" /></svg>
+                                                </Link>
+                                                {canDelete(trip) && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            if (confirm(`Hapus permintaan perjalanan ${trip.trip_number}?`)) {
+                                                                router.delete(route('trips.destroy', trip.id), { preserveState: false });
+                                                            }
+                                                        }}
+                                                        aria-label="Hapus permintaan perjalanan"
+                                                        className="inline-flex items-center justify-center rounded-lg border border-[#E2E8F0] bg-white p-1.5 text-[#64748B] transition hover:border-[#FECACA] hover:bg-[#FEF2F2] hover:text-[#DC2626]"
+                                                    >
+                                                        <TrashIcon className="h-3.5 w-3.5" />
+                                                    </button>
+                                                )}
+                                            </div>
                                         </td>
                                     </tr>
                                 ))

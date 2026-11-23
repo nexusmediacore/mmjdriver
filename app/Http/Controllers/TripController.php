@@ -79,7 +79,21 @@ class TripController extends Controller
 
         return Inertia::render('Trips/Index', [
             'trips' => [
-                'data' => $trips->items(),
+                'data' => collect($trips->items())->map(fn ($trip) => [
+                    'id' => $trip->id,
+                    'trip_number' => $trip->trip_number,
+                    'destination' => $trip->destination,
+                    'purpose' => $trip->purpose,
+                    'departure_time' => $trip->departure_time?->toISOString(),
+                    'status' => $trip->status,
+                    'priority' => $trip->priority,
+                    'request_type' => $trip->request_type,
+                    'requestor' => $trip->requestor ? [
+                        'id' => $trip->requestor->id,
+                        'name' => $trip->requestor->name,
+                    ] : null,
+                    'requestor_id' => $trip->requestor_id,
+                ])->all(),
                 'links' => $trips->appends(request()->query())->links()->render(),
                 'current_page' => $trips->currentPage(),
                 'per_page' => $trips->perPage(),
