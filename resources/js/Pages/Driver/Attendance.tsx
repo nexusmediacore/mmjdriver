@@ -116,100 +116,30 @@ async function watermarkImageFile(
                     return;
                 }
 
-                // 1. Gambar foto utama
+                // 1. Gambar foto utama — MIRRORED seperti tampilan preview
+                // kamera depan, agar hasil foto sama dengan yang dilihat
+                // pengguna saat mengambil selfie.
+                ctx.save();
+                ctx.translate(width, 0);
+                ctx.scale(-1, 1);
                 ctx.drawImage(img, 0, 0, width, height);
+                ctx.restore();
 
-                // 2. Siapkan teks timestamp & lokasi
-                const now = new Date();
-                const dateStr = now.toLocaleDateString('id-ID', {
-                    weekday: 'long',
-                    year: 'numeric',
-                    month: 'long',
-                    day: 'numeric',
-                });
-                const timeStr = now.toLocaleTimeString('id-ID', {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    second: '2-digit',
-                });
-                const timestampText = `${dateStr} • ${timeStr} WIB`;
-
-                const extraLines: string[] = [];
-                if (location?.lat !== undefined && location?.lng !== undefined) {
-                    extraLines.push(`Koordinat: ${location.lat.toFixed(6)}, ${location.lng.toFixed(6)}`);
-                }
-                if (location?.streetName) {
-                    extraLines.push(`Lokasi: ${location.streetName}`);
-                }
-
-                // 3. Ukuran font proporsional terhadap tinggi gambar
-                const fontSize = Math.max(16, Math.round(height * 0.028));
-                const subFontSize = Math.max(12, Math.round(fontSize * 0.72));
-                const locFontSize = Math.max(11, Math.round(fontSize * 0.65));
-                const padding = Math.round(fontSize * 0.8);
-
-                ctx.font = `bold ${fontSize}px sans-serif`;
-                let maxWidth = Math.max(
-                    ctx.measureText(timestampText).width,
-                    ctx.measureText(label).width
-                );
-
-                ctx.font = `${locFontSize}px sans-serif`;
-                extraLines.forEach((line) => {
-                    const w = ctx.measureText(line).width;
-                    if (w > maxWidth) maxWidth = w;
-                });
-
-                const bannerHeight =
-                    fontSize +
-                    subFontSize +
-                    extraLines.length * (locFontSize + 4) +
-                    padding * 2.5;
-
-                // 4. Baris latar transparan gelap di bagian bawah untuk keterbacaan tinggi
-                const bannerY = height - bannerHeight - padding;
-                ctx.fillStyle = 'rgba(15, 23, 42, 0.76)';
-                ctx.fillRect(padding, bannerY, maxWidth + padding * 2.5, bannerHeight);
-
-                // Garis aksen kiri
-                ctx.fillStyle = '#2563EB';
-                ctx.fillRect(padding, bannerY, Math.max(4, Math.round(fontSize * 0.2)), bannerHeight);
-
-                // 5. Teks watermark
-                // Label (ABSEN MASUK / ABSEN PULANG • NAMA DRIVER)
-                let textY = bannerY + padding * 0.6;
-                ctx.fillStyle = '#FFFFFF';
-                ctx.textBaseline = 'top';
-                ctx.font = `bold ${fontSize}px sans-serif`;
-                ctx.fillText(label, padding * 2, textY);
-
-                // Timestamp waktu WIB (Kuning keemasan)
-                textY += fontSize + 4;
-                ctx.fillStyle = '#FCD34D';
-                ctx.font = `${subFontSize}px monospace, sans-serif`;
-                ctx.fillText(timestampText, padding * 2, textY);
-
-                // Garis koordinat & nama jalan (Biru muda lembut)
-                ctx.fillStyle = '#93C5FD';
-                ctx.font = `${locFontSize}px sans-serif`;
-                extraLines.forEach((line) => {
-                    textY += locFontSize + 4;
-                    ctx.fillText(line, padding * 2, textY);
-                });
-
-                // 6. Ekspor ke Blob JPEG
+                // 2. Watermark tidak dibubuhkan di sini: overlay timestamp
+                // resmi ditambahkan sekali oleh server (GD) agar tidak
+                // muncul dobel di foto yang tersimpan.
                 canvas.toBlob(
                     (blob) => {
                         if (!blob) {
                             resolve(file);
                             return;
                         }
-                        const stampedFile = new File(
+                        const mirroredFile = new File(
                             [blob],
-                            `attendance-stamped-${Date.now()}.jpg`,
+                            `attendance-mirrored-${Date.now()}.jpg`,
                             { type: 'image/jpeg' }
                         );
-                        resolve(stampedFile);
+                        resolve(mirroredFile);
                     },
                     'image/jpeg',
                     0.88
@@ -296,9 +226,12 @@ function SelfieCapture({
     const applyWatermarkAndSet = async (rawFile: File) => {
         setWatermarking(true);
         try {
+            // Frontend hanya mirror frame; label & timestamp dibubuhkan
+            // sekali oleh server (DriverAttendanceService). Parameter ini
+            // tetap dipass agar helper tidak berubah bila dibutuhkan lagi.
             const label = `${modeLabel ?? 'ABSENSI DRIVER'} • ${driverName ?? 'DRIVER'}`.toUpperCase();
-            const stamped = await watermarkImageFile(rawFile, label, location);
-            onPhoto(stamped);
+            const mirrored = await watermarkImageFile(rawFile, label, location);
+            onPhoto(mirrored);
         } finally {
             setWatermarking(false);
         }
@@ -311,7 +244,15 @@ function SelfieCapture({
         const canvas = document.createElement('canvas');
         canvas.width = video.videoWidth || 720;
         canvas.height = video.videoHeight || 720;
-        canvas.getContext('2d')?.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+            // Mirror frame seperti tampilan preview (kamera depan).
+            ctx.save();
+            ctx.translate(canvas.width, 0);
+            ctx.scale(-1, 1);
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            ctx.restore();
+        }
 
         canvas.toBlob(
             async (blob) => {
@@ -338,13 +279,13 @@ function SelfieCapture({
                     <img src={preview} alt="Preview selfie bertanda timestamp" className="h-full w-full object-cover" />
                 ) : (
                     <>
-                        <video ref={videoRef} playsInline muted className={`h-full w-full object-cover ${cameraActive ? '' : 'hidden'}`} />
+                        <video ref={videoRef} playsInline muted className={`h-full w-full object-cover transform scale-x-[-1] ${cameraActive ? '' : 'hidden'}`} />
                         {!cameraActive && (
                             <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-center text-white/80">
                                 <CameraIcon className="h-10 w-10 text-[#60A5FA]" />
                                 <p className="px-6 text-xs">Ambil foto selfie langsung dengan kamera</p>
                                 <span className="inline-block rounded-full bg-white/10 px-2.5 py-0.5 text-[10px] text-[#FCD34D]">
-                                    Watermark timestamp otomatis dibubuhkan
+                                    Foto hasil sama seperti tampilan kamera (mirror) — timestamp resmi dibubuhkan server
                                 </span>
                             </div>
                         )}
@@ -353,7 +294,7 @@ function SelfieCapture({
 
                 {watermarking && (
                     <div className="absolute inset-0 flex items-center justify-center bg-black/60 text-xs font-semibold text-white">
-                        Menerapkan timestamp pada foto...
+                        Memproses foto...
                     </div>
                 )}
             </div>
@@ -367,7 +308,7 @@ function SelfieCapture({
                             disabled={watermarking}
                             className="mmj-btn mmj-btn-primary px-4 py-2 text-sm"
                         >
-                            <CameraIcon className="h-4 w-4" /> Ambil Foto & Beri Timestamp
+                            <CameraIcon className="h-4 w-4" /> Ambil Foto
                         </button>
                         <button
                             type="button"
@@ -631,7 +572,7 @@ export default function DriverAttendance({ driver, today, history, office }: Pro
 
                     <Panel
                         title={mode === 'in' ? 'Absen Masuk' : 'Absen Pulang'}
-                        description="Wajib ambil foto selfie melalui kamera (foto otomatis dibubuhi tanda timestamp)."
+                        description="Wajib ambil foto selfie melalui kamera. Hasil foto sama seperti tampilan kamera (mirror) dan server membubuhkan timestamp resmi sekali pada foto tersimpan."
                         icon={<CameraIcon className="h-4 w-4" />}
                     >
                         {bothDone ? (
@@ -793,11 +734,11 @@ export default function DriverAttendance({ driver, today, history, office }: Pro
                                         </thead>
                                         <tbody>
                                             {history.map((row) => (
-                                                <tr key={row.id}>
+                                                <tr key={row.id} className="text-base font-semibold text-[#0F172A]">
                                                     <td>{day(row.date)}</td>
                                                     <td>{time(row.clock_in_at)}</td>
                                                     <td>{time(row.clock_out_at)}</td>
-                                                    <td>{duration(row.work_duration_minutes)}</td>
+                                                    <td className="font-normal">{duration(row.work_duration_minutes)}</td>
                                                 </tr>
                                             ))}
                                         </tbody>

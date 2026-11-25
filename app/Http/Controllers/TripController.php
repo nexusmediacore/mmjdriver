@@ -10,6 +10,7 @@ use App\Http\Requests\RejectTripRequest as RejectTripRequestForm;
 use App\Http\Requests\StartTripRequest;
 use App\Http\Requests\StoreTripRequest;
 use App\Http\Requests\SubmitTripCompletionRequest;
+use App\Http\Requests\UpdateTripRequest;
 use App\Models\Department;
 use App\Models\Driver;
 use App\Models\TripAssignment;
@@ -17,6 +18,7 @@ use App\Models\TripRequest;
 use App\Models\User;
 use App\Models\Vehicle;
 use App\Notifications\DriverAssigned;
+use App\Services\LoadingApprovalService;
 use App\Services\TripService;
 use App\Services\WhatsAppService;
 use Carbon\Carbon;
@@ -111,6 +113,13 @@ class TripController extends Controller
     {
         $user = Auth::user();
 
+        // Driver hanya boleh membuka formulir untuk pengajuan BOD.
+        abort_if(
+            $user->role?->name === 'DRIVER' && ! Department::isBod((int) $user->department_id),
+            403,
+            'Driver hanya dapat mengajukan perjalanan untuk departemen Board of Directors (BOD).'
+        );
+
         $departments = Department::all();
         $employees = User::with('role')->get();
         $drivers = Driver::with(['user', 'allowedVehicles'])->get();
@@ -153,13 +162,23 @@ class TripController extends Controller
 
         $user = Auth::user();
 
+        $departments = Department::all();
+        $employees = User::with('role')->get();
         $drivers = Driver::with(['user', 'allowedVehicles'])->get();
+        $vehicles = Vehicle::whereIn('status', ['AVAILABLE', 'ASSIGNED'])->get();
+
+        $trip->load([
+            'requestor.role', 'department', 'driver.user', 'vehicle',
+            'passengers',
+        ]);
 
         return Inertia::render('Trips/Edit', [
             'trip' => [
                 'id' => $trip->id,
+                'trip_number' => $trip->trip_number,
                 'request_type' => $trip->request_type,
                 'department_id' => $trip->department_id,
+                'driver_id' => $trip->assigned_driver_id,
                 'destination' => $trip->destination,
                 'destination_address' => $trip->destination_address,
                 'guest_pickup_location' => $trip->guest_pickup_location,
@@ -168,8 +187,6 @@ class TripController extends Controller
                 'cargo_description' => $trip->cargo_description,
                 'purpose' => $trip->purpose,
                 'trip_date' => $trip->trip_date?->toDateString(),
-                // Format datetime-local: Y-m-d\TH:i (waktu lokal, tanpa
-                // konversi zona waktu).
                 'departure_time' => $trip->departure_time
                     ? Carbon::parse($trip->departure_time)->format('Y-m-d\TH:i')
                     : '',
@@ -181,6 +198,7 @@ class TripController extends Controller
                 'notes' => $trip->notes,
                 'bod_link' => $trip->bod_link,
                 'passengers' => $trip->passengers->map(fn ($p) => [
+                    'id' => $p->id,
                     'name' => $p->name,
                     'phone' => $p->phone,
                     'department' => $p->department,
@@ -191,29 +209,52 @@ class TripController extends Controller
                     ->pluck('driver_id')
                     ->toArray(),
             ],
+            'departments' => $departments->map(fn ($d) => [
+                'id' => $d->id,
+                'name' => $d->name,
+                'code' => $d->code,
+            ]),
+            'employees' => $employees->map(fn ($e) => [
+                'id' => $e->id,
+                'name' => $e->name,
+                'email' => $e->email,
+            ]),
             'drivers' => $drivers->map(fn ($d) => [
                 'id' => $d->id,
                 'name' => $d->user->name,
                 'status' => $d->status,
                 'willing_to_load' => $d->willing_to_load,
-                'vehicle_ids' => $d->allowedVehicles->pluck('id')->toArray(),
+                'allowed_vehicle_ids' => $d->allowedVehicles->pluck('id')->toArray(),
+            ]),
+            'vehicles' => $vehicles->map(fn ($v) => [
+                'id' => $v->id,
+                'plate_number' => $v->plate_number,
+                'brand' => $v->brand,
+                'model' => $v->model,
+                'type' => $v->type,
+                'status' => $v->status,
+                'passenger_capacity' => $v->passenger_capacity,
             ]),
         ]);
     }
 
     /**
-     * Simpan perubahan permintaan perjalanan (hanya saat DRAFT).
+     * Simpan perubahan permintaan perjalanan.
+     * SuperAdmin dapat mengedit semua field trip dalam status apa pun
+     * (termasuk COMPLETED); non-SuperAdmin hanya DRAFT.
      */
-    public function update(StoreTripRequest $request, TripRequest $trip): RedirectResponse
+    public function update(UpdateTripRequest $request, TripRequest $trip): RedirectResponse
     {
         $this->authorize('update', $trip);
 
-        if ($trip->status !== TripRequest::STATUS_DRAFT) {
+        $isSuperAdmin = Auth::user()?->role?->name === 'SUPERADMIN';
+
+        if (! $isSuperAdmin && $trip->status !== TripRequest::STATUS_DRAFT) {
             return back()->with('error', 'Hanya permintaan berstatus Draft yang dapat diedit.');
         }
 
         try {
-            $this->tripService->updateTrip($trip, $request->validated(), Auth::user());
+            $this->tripService->updateTrip($trip, $request->validated(), Auth::user(), $isSuperAdmin);
 
             return redirect()->route('trips.show', $trip)
                 ->with('success', 'Permintaan perjalanan berhasil diperbarui.');
@@ -225,7 +266,7 @@ class TripController extends Controller
     public function store(StoreTripRequest $request): RedirectResponse
     {
         try {
-            $this->authorize('create', TripRequest::class);
+            $this->authorize('create', [TripRequest::class, $request->validated()]);
             $trip = $this->tripService->createTrip($request->validated(), Auth::user());
 
             // Trip BOD: driver dipilih langsung saat membuat permintaan.
@@ -313,6 +354,11 @@ class TripController extends Controller
                 'completion_submitted_by' => $trip->completionSubmittedBy?->name,
                 'completion_approved_at' => $trip->completion_approved_at?->toIso8601String(),
                 'completion_approved_by' => $trip->completionApprovedBy?->name,
+                'loading_approval_status' => $trip->loading_approval_status,
+                'loading_approval_note' => $trip->loading_approval_note,
+                'loading_approved_by_name' => User::find($trip->loading_approved_by)?->name,
+                'loading_approved_at' => $trip->loading_approved_at?->toIso8601String(),
+                'can_loading_approval' => $trip->loading_approval_status === TripRequest::LOADING_PENDING,
                 'can_submit_completion' => $this->canSubmitCompletion($trip, $user),
                 'assigned_driver_ids' => $trip->assignments->pluck('driver_id')->values()->all(),
                 'assignments' => $trip->assignments->map(fn ($a) => [
@@ -418,6 +464,10 @@ class TripController extends Controller
     {
         $this->authorize('update', $trip);
 
+        if (Auth::user()?->role?->name === 'EMPLOYEE') {
+            return back()->with('error', 'Hanya SuperAdmin dan Admin yang dapat mengajukan permintaan perjalanan.');
+        }
+
         try {
             $this->tripService->submitTrip($trip, Auth::user());
 
@@ -521,6 +571,38 @@ class TripController extends Controller
                 : 'Anda menolak penugasan ini.';
 
             return back()->with('success', $message);
+        } catch (\Exception $e) {
+            return back()->with('error', $e->getMessage());
+        }
+    }
+
+    /**
+     * Persetujuan Superadmin atas driver bantu muat (mode muat barang).
+     * Terpisah dari alur approval trip reguler.
+     */
+    public function loadingApproval(Request $request, TripRequest $trip): RedirectResponse
+    {
+        $user = Auth::user();
+
+        abort_unless($user?->role?->name === 'SUPERADMIN', 403, 'Hanya SuperAdmin yang dapat memproses persetujuan ini.');
+
+        $request->validate([
+            'decision' => 'required|in:approve,reject',
+            'note' => 'nullable|string|max:1000',
+        ]);
+
+        try {
+            $service = app(LoadingApprovalService::class);
+
+            if ($request->input('decision') === 'approve') {
+                $service->approve($trip, $user, $request->input('note'));
+
+                return back()->with('success', 'Driver bantu muat berhasil disetujui.');
+            }
+
+            $service->reject($trip, $user, $request->input('note'));
+
+            return back()->with('success', 'Driver bantu muat ditolak.');
         } catch (\Exception $e) {
             return back()->with('error', $e->getMessage());
         }

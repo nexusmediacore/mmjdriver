@@ -25,6 +25,7 @@ class TripRejected extends Notification
             'trip_number' => $this->trip->trip_number,
             'message' => "Permintaan perjalanan {$this->trip->trip_number} ditolak. Alasan: {$this->reason}",
             'reason' => $this->reason,
+            'url' => '/trips/'.$this->trip->id,
             'created_at' => now()->toDateTimeString(),
         ];
     }

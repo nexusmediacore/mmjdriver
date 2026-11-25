@@ -55,6 +55,14 @@ class TripRequest extends Model
 
     const STATUS_CANCELLED = 'CANCELLED';
 
+    const LOADING_NONE = 'NONE';
+
+    const LOADING_PENDING = 'PENDING';
+
+    const LOADING_APPROVED = 'APPROVED';
+
+    const LOADING_REJECTED = 'REJECTED';
+
     /**
      * Status trip yang dianggap masih berjalan (belum selesai / batal / ditolak).
      *
@@ -101,6 +109,7 @@ class TripRequest extends Model
         'completion_notes', 'actual_return_time',
         'completion_submitted_at', 'completion_submitted_by',
         'completion_approved_at', 'completion_approved_by',
+        'loading_approval_status', 'loading_approved_by', 'loading_approved_at', 'loading_approval_note',
     ];
 
     protected $casts = [
@@ -118,6 +127,7 @@ class TripRequest extends Model
         'actual_return_time' => 'string',
         'completion_submitted_at' => 'datetime',
         'completion_approved_at' => 'datetime',
+        'loading_approved_at' => 'datetime',
     ];
 
     public function requestor()

@@ -82,7 +82,7 @@ class TripWorkflowTest extends TestCase
         );
     }
 
-    public function test_employee_can_submit_trip(): void
+    public function test_employee_cannot_submit_trip(): void
     {
         $employee = User::where('email', 'employee1@example.com')->first();
         $trip = $this->makeTrip();
@@ -90,7 +90,7 @@ class TripWorkflowTest extends TestCase
         $response = $this->actingAs($employee)->post(route('trips.submit', $trip));
 
         $response->assertRedirect();
-        $this->assertEquals(TripRequest::STATUS_WAITING_APPROVAL, $trip->fresh()->status);
+        $this->assertEquals(TripRequest::STATUS_DRAFT, $trip->fresh()->status);
     }
 
     public function test_approver_can_approve_trip(): void

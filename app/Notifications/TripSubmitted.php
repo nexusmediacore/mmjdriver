@@ -25,6 +25,7 @@ class TripSubmitted extends Notification
             'message' => "Permintaan perjalanan {$this->trip->trip_number} telah disubmit dan menunggu persetujuan.",
             'destination' => $this->trip->destination,
             'priority' => $this->trip->priority,
+            'url' => '/trips/'.$this->trip->id,
             'created_at' => now()->toDateTimeString(),
         ];
     }

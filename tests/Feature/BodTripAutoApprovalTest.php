@@ -230,4 +230,79 @@ class BodTripAutoApprovalTest extends TestCase
             'to_status' => TripRequest::STATUS_APPROVED,
         ]);
     }
+
+    public function test_bod_trip_stores_departure_date_and_time_from_form(): void
+    {
+        $superadmin = User::whereHas('role', fn ($q) => $q->where('name', 'SUPERADMIN'))->firstOrFail();
+        $bodId = Department::where('code', 'BOD')->value('id');
+        $driver = Driver::firstOrFail();
+
+        // Payload frontend: tanggal + jam keberangkatan digabung menjadi
+        // departure_time "Y-m-d H:i:00".
+        $response = $this->actingAs($superadmin)->post(route('trips.store'), [
+            'request_type' => 'BUSINESS_TRIP',
+            'department_id' => $bodId,
+            'driver_id' => $driver->id,
+            'trip_date' => '2026-12-01',
+            'departure_time' => '2026-12-01 08:30:00',
+            'destination' => 'Jakarta',
+            'purpose' => 'Rapat direksi',
+            'passenger_count' => 1,
+            'priority' => 'NORMAL',
+        ]);
+
+        $response->assertRedirect();
+
+        $trip = TripRequest::where('department_id', $bodId)->latest('id')->first();
+        $this->assertNotNull($trip);
+        $this->assertSame('2026-12-01', $trip->trip_date->toDateString());
+        $this->assertStringStartsWith('2026-12-01 08:30:00', (string) $trip->departure_time);
+    }
+
+    public function test_superadmin_can_update_bod_trip_departure_date_time_and_driver(): void
+    {
+        $superadmin = User::whereHas('role', fn ($q) => $q->where('name', 'SUPERADMIN'))->firstOrFail();
+        $bodId = Department::where('code', 'BOD')->value('id');
+        $driverA = Driver::whereHas('user')->firstOrFail();
+        $driverB = Driver::whereHas('user')->where('id', '!=', $driverA->id)->whereNotIn('status', Driver::inactiveStatuses())->first();
+
+        $trip = (new TripService)->createTrip([
+            'request_type' => 'BUSINESS_TRIP',
+            'department_id' => $bodId,
+            'driver_id' => $driverA->id,
+            'trip_date' => '2026-12-01',
+            'departure_time' => '2026-12-01 08:30:00',
+            'destination' => 'Jakarta',
+            'purpose' => 'Rapat direksi',
+            'passenger_count' => 1,
+            'priority' => 'NORMAL',
+        ], $superadmin);
+
+        $response = $this->actingAs($superadmin)->put(route('trips.update', $trip), [
+            'request_type' => 'BUSINESS_TRIP',
+            'department_id' => $bodId,
+            'driver_id' => $driverB ? $driverB->id : $driverA->id,
+            'trip_date' => '2026-12-02',
+            'departure_time' => '2026-12-02 09:45:00',
+            'destination' => 'Bandung',
+            'purpose' => 'Rapat klien',
+            'passenger_count' => 2,
+            'priority' => 'NORMAL',
+            'notes' => 'Diubah lewat form edit.',
+        ]);
+
+        $response->assertRedirect(route('trips.show', $trip));
+
+        $trip->refresh();
+        $this->assertSame('2026-12-02', $trip->trip_date->toDateString());
+        $this->assertStringStartsWith('2026-12-02 09:45:00', (string) $trip->departure_time);
+        $this->assertSame('Bandung', $trip->destination);
+        $this->assertSame('Rapat klien', $trip->purpose);
+        $this->assertSame(2, $trip->passenger_count);
+        $this->assertSame('Diubah lewat form edit.', $trip->notes);
+
+        if ($driverB) {
+            $this->assertSame($driverB->id, $trip->assigned_driver_id);
+        }
+    }
 }

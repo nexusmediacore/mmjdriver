@@ -33,7 +33,7 @@ export default function ReportsIndex({ stats, byDepartment, byDriver, byVehicle,
     };
 
     const handlePdf = () => {
-        window.open(`/reports/pdf?date_from=${dateFrom}&date_to=${dateTo}`, '_blank', 'noopener,noreferrer');
+        window.location.href = `/reports/pdf?date_from=${dateFrom}&date_to=${dateTo}`;
     };
 
     const dept = useTableSearch(byDepartment, ['name']);

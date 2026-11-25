@@ -66,11 +66,12 @@ class TripService
             // Peran lain (admin departemen, karyawan) hanya dapat mengusulkan
             // prioritas lewat `requested_priority` + `urgency_notes`.
             $isSuperAdmin = $user->role?->name === 'SUPERADMIN';
+            $isDriver = $user->role?->name === 'DRIVER';
             $finalPriority = $isSuperAdmin
                 ? ($data['priority'] ?? TripRequest::PRIORITY_NORMAL)
                 : TripRequest::PRIORITY_NORMAL;
 
-            $departmentId = $isSuperAdmin ? $data['department_id'] : $user->department_id;
+            $departmentId = ($isSuperAdmin || $isDriver) ? $data['department_id'] : $user->department_id;
 
             // Trip dari departemen BOD (Board of Directors) otomatis disetujui:
             // tidak perlu submit maupun approval, langsung masuk alur penugasan driver.
@@ -96,7 +97,7 @@ class TripService
                 'trip_date' => $data['trip_date'] ?? ($isBodTrip
                     ? now()->addDay()->toDateString()
                     : now()->toDateString()),
-                'departure_time' => $data['departure_time'],
+                'departure_time' => $data['departure_time'] ?? null,
                 'estimated_return_time' => $data['estimated_return_time'] ?? null,
                 'destination' => $data['destination'],
                 'destination_address' => $data['destination_address'] ?? null,
@@ -104,7 +105,7 @@ class TripService
                 'guest_institution' => $data['guest_institution'] ?? null,
                 'cargo_pickup_location' => $data['cargo_pickup_location'] ?? null,
                 'cargo_description' => $data['cargo_description'] ?? null,
-                'purpose' => $data['purpose'],
+                'purpose' => $data['purpose'] ?? null,
                 'passenger_count' => $data['passenger_count'] ?? 1,
                 'priority' => $finalPriority,
                 'requested_priority' => $data['requested_priority'] ?? null,
@@ -112,6 +113,7 @@ class TripService
                 'requires_loading_assistance' => $this->isPurchasingLoadingTrip($data, $departmentId)
                     ? true
                     : ($data['requires_loading_assistance'] ?? false),
+                'notes' => $data['notes'] ?? null,
                 'status' => $isBodTrip ? TripRequest::STATUS_APPROVED : TripRequest::STATUS_DRAFT,
                 'created_by' => $user->id,
                 'updated_by' => $user->id,
@@ -179,6 +181,9 @@ class TripService
             // STANDBY dan bersedia membantu loading (sudah divalidasi di
             // StoreTripRequest). Trip masih DRAFT — assignment pendukung
             // dibuat sekarang agar dispatcher tidak perlu menugaskan ulang.
+            // Muat barang: pemohon bisa memilih supir siapa saja yang ikut
+            // muat (tanpa batasan status). Penugasan dibuat langsung saat
+            // permintaan disimpan — trip tidak masuk status WAITING_DRIVER.
             $supportDriverIds = collect($data['loading_support_driver_ids'] ?? [])
                 ->map(fn ($id) => (int) $id)
                 ->filter()
@@ -187,6 +192,9 @@ class TripService
 
             if ($supportDriverIds->isNotEmpty()) {
                 $this->assignLoadingSupportDrivers($trip, $supportDriverIds->all(), $user);
+
+                // Pemilihan driver bantu muat menunggu persetujuan Superadmin.
+                app(LoadingApprovalService::class)->requestApproval($trip->fresh());
             }
 
             return $trip;
@@ -200,10 +208,9 @@ class TripService
      */
     protected function assignLoadingSupportDrivers(TripRequest $trip, array $driverIds, $user): void
     {
-        $drivers = Driver::whereIn('id', $driverIds)
-            ->where('status', Driver::STATUS_STANDBY)
-            ->where('willing_to_load', true)
-            ->get();
+        // Mode muat barang: bebas pilih driver apa pun — tanpa filter status
+        // maupun kesediaan loading. Driver apa pun boleh ditunjuk.
+        $drivers = Driver::whereIn('id', $driverIds)->get();
 
         foreach ($drivers as $driver) {
             $trip->assignments()->create([
@@ -218,7 +225,8 @@ class TripService
             $trip->loadingRequests()->create([
                 'driver_id' => $driver->id,
                 'status' => LoadingRequest::STATUS_PENDING,
-                'notes' => 'Driver pendukung loading (dipilih saat membuat trip request)',
+                'approval_status' => LoadingRequest::APPROVAL_PENDING,
+                'notes' => 'Driver bantu muat (dipilih saat membuat trip request)',
             ]);
 
             AuditLog::create([
@@ -235,47 +243,80 @@ class TripService
     }
 
     /**
-     * Perbarui permintaan perjalanan. Hanya trip berstatus DRAFT yang boleh
-     * diedit. Penumpang & driver pendukung loading ikut disinkronkan.
+     * Perbarui permintaan perjalanan.
+     * SuperAdmin dapat mengedit semua field dalam status apa pun
+     * (termasuk COMPLETED); non-SuperAdmin hanya DRAFT.
      */
-    public function updateTrip(TripRequest $trip, array $data, $user): TripRequest
+    public function updateTrip(TripRequest $trip, array $data, $user, bool $isSuperAdmin = false): TripRequest
     {
-        if ($trip->status !== TripRequest::STATUS_DRAFT) {
+        if (! $isSuperAdmin && $trip->status !== TripRequest::STATUS_DRAFT) {
             throw new \Exception('Hanya permintaan berstatus Draft yang dapat diedit.');
         }
 
-        return DB::transaction(function () use ($trip, $data, $user) {
-            $isSuperAdmin = $user->role?->name === 'SUPERADMIN';
-
+        return DB::transaction(function () use ($trip, $data, $user, $isSuperAdmin) {
             $trip->update([
-                'request_type' => $data['request_type'] ?? $trip->request_type,
+                'request_type' => $isSuperAdmin && array_key_exists('request_type', $data)
+                    ? ($data['request_type'] ?? $trip->request_type)
+                    : $trip->request_type,
                 'department_id' => $isSuperAdmin
                     ? ($data['department_id'] ?? $trip->department_id)
                     : $trip->department_id,
-                'trip_date' => $data['trip_date'] ?? $trip->trip_date,
-                'departure_time' => $data['departure_time'],
-                'estimated_return_time' => $data['estimated_return_time'] ?? $trip->estimated_return_time,
-                'destination' => $data['destination'],
-                'destination_address' => $data['destination_address'] ?? null,
-                'guest_pickup_location' => $data['guest_pickup_location'] ?? null,
-                'guest_institution' => $data['guest_institution'] ?? null,
-                'cargo_pickup_location' => $data['cargo_pickup_location'] ?? null,
-                'cargo_description' => $data['cargo_description'] ?? null,
-                'purpose' => $data['purpose'],
-                'passenger_count' => $data['passenger_count'] ?? $trip->passenger_count,
+                'trip_date' => $isSuperAdmin && array_key_exists('trip_date', $data)
+                    ? ($data['trip_date'] ?? $trip->trip_date)
+                    : $trip->trip_date,
+                'departure_time' => $isSuperAdmin && array_key_exists('departure_time', $data)
+                    ? $data['departure_time']
+                    : $trip->departure_time,
+                'estimated_return_time' => $isSuperAdmin && array_key_exists('estimated_return_time', $data)
+                    ? ($data['estimated_return_time'] ?? $trip->estimated_return_time)
+                    : $trip->estimated_return_time,
+                'destination' => $isSuperAdmin && array_key_exists('destination', $data)
+                    ? ($data['destination'] !== '' ? $data['destination'] : $trip->destination)
+                    : $trip->destination,
+                'destination_address' => $isSuperAdmin && array_key_exists('destination_address', $data)
+                    ? ($data['destination_address'] ?? null)
+                    : $trip->destination_address,
+                'guest_pickup_location' => $isSuperAdmin && array_key_exists('guest_pickup_location', $data)
+                    ? ($data['guest_pickup_location'] ?? null)
+                    : $trip->guest_pickup_location,
+                'guest_institution' => $isSuperAdmin && array_key_exists('guest_institution', $data)
+                    ? ($data['guest_institution'] ?? null)
+                    : $trip->guest_institution,
+                'cargo_pickup_location' => $isSuperAdmin && array_key_exists('cargo_pickup_location', $data)
+                    ? ($data['cargo_pickup_location'] ?? null)
+                    : $trip->cargo_pickup_location,
+                'cargo_description' => $isSuperAdmin && array_key_exists('cargo_description', $data)
+                    ? ($data['cargo_description'] ?? null)
+                    : $trip->cargo_description,
+                'purpose' => $isSuperAdmin && array_key_exists('purpose', $data)
+                    ? ($data['purpose'] !== '' ? $data['purpose'] : $trip->purpose)
+                    : $trip->purpose,
+                'passenger_count' => $isSuperAdmin && array_key_exists('passenger_count', $data)
+                    ? ($data['passenger_count'] ?? $trip->passenger_count)
+                    : $trip->passenger_count,
                 'priority' => $isSuperAdmin
                     ? ($data['priority'] ?? $trip->priority)
                     : $trip->priority,
-                'requested_priority' => $data['requested_priority'] ?? null,
-                'urgency_notes' => $data['urgency_notes'] ?? null,
-                'requires_loading_assistance' => $data['requires_loading_assistance'] ?? false,
-                'notes' => $data['notes'] ?? null,
-                'bod_link' => $data['bod_link'] ?? $trip->bod_link,
+                'requested_priority' => $isSuperAdmin && array_key_exists('requested_priority', $data)
+                    ? ($data['requested_priority'] ?? null)
+                    : null,
+                'urgency_notes' => $isSuperAdmin && array_key_exists('urgency_notes', $data)
+                    ? ($data['urgency_notes'] ?? null)
+                    : null,
+                'requires_loading_assistance' => $isSuperAdmin && array_key_exists('requires_loading_assistance', $data)
+                    ? (bool) ($data['requires_loading_assistance'] ?? false)
+                    : $trip->requires_loading_assistance,
+                'notes' => $isSuperAdmin && array_key_exists('notes', $data)
+                    ? ($data['notes'] ?? null)
+                    : $trip->notes,
+                'bod_link' => $isSuperAdmin && array_key_exists('bod_link', $data)
+                    ? ($data['bod_link'] !== '' ? $data['bod_link'] : null)
+                    : $trip->bod_link,
                 'updated_by' => $user->id,
             ]);
 
-            // Sinkronkan ulang daftar penumpang.
-            if (array_key_exists('passengers', $data)) {
+            // Sinkronkan ulang daftar penumpang (SuperAdmin, semua status).
+            if ($isSuperAdmin && array_key_exists('passengers', $data)) {
                 $trip->passengers()->delete();
 
                 foreach ($data['passengers'] ?? [] as $passengerData) {
@@ -283,21 +324,61 @@ class TripService
                 }
             }
 
-            // Sinkronkan driver pendukung loading.
+            // Trip BOD: driver dipilih langsung di form (bukan via panel
+            // assignment dispatcher). Sinkronkan assigned_driver_id saat edit.
+            if ($isSuperAdmin && array_key_exists('driver_id', $data) && $trip->isBodTrip()) {
+                $driverId = $data['driver_id'] ? (int) $data['driver_id'] : null;
+
+                if ($driverId && (int) $trip->assigned_driver_id !== $driverId) {
+                    $driver = Driver::with('user')->find($driverId);
+
+                    if ($driver && ! $driver->isInactive()) {
+                        $trip->update([
+                            'assigned_driver_id' => $driver->id,
+                            'updated_by' => $user->id,
+                        ]);
+
+                        // Buat ulang assignment utama agar riwayat penugasan tetap konsisten.
+                        $trip->assignments()->where('role', TripAssignment::ROLE_MAIN)->delete();
+                        $trip->assignments()->create([
+                            'driver_id' => $driver->id,
+                            'vehicle_id' => null,
+                            'assigned_by' => $user->id,
+                            'assigned_at' => now(),
+                            'driver_accepted_at' => now(),
+                            'driver_response' => TripAssignment::RESPONSE_ACCEPTED,
+                        ]);
+
+                        $driver->user->notify(new DriverAssigned($trip->fresh()));
+                    }
+                }
+            }
+
+            // Muat barang: pemohon bisa memilih supir siapa saja yang ikut
+            // muat — sinkronkan ulang penugasan saat edit.
             $supportDriverIds = collect($data['loading_support_driver_ids'] ?? [])
                 ->map(fn ($id) => (int) $id)
                 ->filter()
                 ->unique()
                 ->values();
 
-            $trip->assignments()
-                ->where('role', TripAssignment::ROLE_LOADING_SUPPORT)
-                ->delete();
+            if ($isSuperAdmin && array_key_exists('loading_support_driver_ids', $data)) {
+                $trip->assignments()
+                    ->where('role', TripAssignment::ROLE_LOADING_SUPPORT)
+                    ->delete();
 
-            $trip->loadingRequests()->delete();
+                $trip->loadingRequests()->delete();
 
-            if ($supportDriverIds->isNotEmpty()) {
-                $this->assignLoadingSupportDrivers($trip, $supportDriverIds->all(), $user);
+                if ($supportDriverIds->isNotEmpty()) {
+                    $this->assignLoadingSupportDrivers($trip, $supportDriverIds->all(), $user);
+
+                    // Supir yang ditetapkan/diubah Superadmin di DRAFT tetap
+                    // menunggu persetujuan loading agar "mana yang
+                    // diperbolehkan" tetap terkendali di alur approval.
+                    if (! $isSuperAdmin || $trip->status === TripRequest::STATUS_DRAFT) {
+                        app(LoadingApprovalService::class)->requestApproval($trip->fresh());
+                    }
+                }
             }
 
             AuditLog::create([
@@ -311,6 +392,8 @@ class TripService
                     'destination' => $trip->destination,
                     'departure_time' => (string) $trip->departure_time,
                     'passenger_count' => $trip->passenger_count,
+                    'loading_support_driver_ids' => $supportDriverIds->all(),
+                    'is_superadmin_edit' => $isSuperAdmin,
                 ]),
                 'ip_address' => request()->ip(),
                 'user_agent' => request()->userAgent(),
@@ -442,9 +525,14 @@ class TripService
             'decided_at' => now(),
         ]);
 
-        // Move to WAITING_DRIVER status
-        $trip->update(['status' => TripRequest::STATUS_WAITING_DRIVER]);
-        $this->logStatus($trip, TripRequest::STATUS_APPROVED, TripRequest::STATUS_WAITING_DRIVER, $user);
+        // Move to WAITING_DRIVER status — kecuali muat barang: aktivitas
+        // internal kantor, tidak memerlukan penugasan driver.
+        if ($trip->request_type === TripRequest::TYPE_CARGO_PICKUP) {
+            $trip->update(['status' => TripRequest::STATUS_APPROVED]);
+        } else {
+            $trip->update(['status' => TripRequest::STATUS_WAITING_DRIVER]);
+            $this->logStatus($trip, TripRequest::STATUS_APPROVED, TripRequest::STATUS_WAITING_DRIVER, $user);
+        }
 
         // Send notification to requestor
         $trip->requestor->notify(new TripApproved($trip));
@@ -1182,6 +1270,9 @@ class TripService
             foreach (Driver::whereIn('id', $driverIds)->get() as $driver) {
                 $this->releaseDriverIfIdle($driver, $user);
             }
+
+            // Pencatatan otomatis ke Berita Acara (idempoten).
+            app(BeritaAcaraService::class)->recordTripCompletion($trip->fresh());
 
             $this->notifyCompletionApproved($trip);
 

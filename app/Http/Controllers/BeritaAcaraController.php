@@ -2,11 +2,10 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\BeritaAcara;
 use App\Models\TripRequest;
+use App\Services\BeritaAcaraService;
 use Barryvdh\DomPDF\Facade\Pdf as PDF;
 use Illuminate\Http\RedirectResponse;
-use Illuminate\Support\Facades\Auth;
 
 class BeritaAcaraController extends Controller
 {
@@ -23,28 +22,10 @@ class BeritaAcaraController extends Controller
             return back()->with('error', 'Berita Acara hanya dapat dibuat untuk perjalanan yang sudah diselesaikan.');
         }
 
-        if ($trip->beritaAcara) {
-            return back()->with('error', 'Berita Acara untuk perjalanan ini sudah ada.');
-        }
+        // Idempoten: gunakan service yang sudah unik per trip.
+        app(BeritaAcaraService::class)->recordTripCompletion($trip);
 
-        $ba = BeritaAcara::create([
-            'ba_number' => $this->generateBaNumber(),
-            'trip_request_id' => $trip->id,
-            'driver_id' => $trip->assigned_driver_id,
-            'vehicle_id' => $trip->assigned_vehicle_id,
-            'requestor_name' => $trip->requestor->name,
-            'department_name' => $trip->department->name,
-            'destination' => $trip->destination,
-            'purpose' => $trip->purpose,
-            'departure_time' => $trip->started_at,
-            'return_time' => $trip->completed_at,
-            'notes' => $trip->completion_notes,
-            'signed_by' => Auth::user()->id,
-            'signed_position' => Auth::user()->role->name,
-            'signed_at' => now(),
-        ]);
-
-        return back()->with('success', 'Berita Acara {$ba->ba_number} telah dibuat.');
+        return back()->with('success', 'Berita Acara telah dibuat.');
     }
 
     public function download(TripRequest $trip)
@@ -67,12 +48,11 @@ class BeritaAcaraController extends Controller
         return $pdf->stream($filename);
     }
 
+    /**
+     * @deprecated Dipindah ke BeritaAcaraService::generateBaNumber().
+     */
     protected function generateBaNumber(): string
     {
-        $year = now()->year;
-        $count = BeritaAcara::whereYear('created_at', $year)->max('id');
-        $seq = $count + 1;
-
-        return 'BA-'.$year.'-'.str_pad($seq, 4, '0', STR_PAD_LEFT);
+        return app(BeritaAcaraService::class)->generateBaNumber();
     }
 }

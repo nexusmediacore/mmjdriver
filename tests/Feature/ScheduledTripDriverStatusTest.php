@@ -245,6 +245,15 @@ class ScheduledTripDriverStatusTest extends TestCase
 
         $driver->update(['status' => Driver::STATUS_STANDBY]);
 
+        // Seeder membuat trip acak (mis. ON_TRIP) untuk driver ini pada hari
+        // lampau yang akan memengaruhi sinkronisasi status. Bersihkan agar
+        // pengujian terhadap trip yang dipersiapkan bersifat hermetik.
+        TripRequest::whereKeyNot($trip->id)
+            ->where(fn ($q) => $q
+                ->where('assigned_driver_id', $driver->id)
+                ->orWhereHas('assignments', fn ($a) => $a->where('driver_id', $driver->id)))
+            ->delete();
+
         $result = (new DriverScheduleService)->activateDueTrips();
 
         // Trip yang dipersiapkan test harus terangkat menjadi READY_TO_DEPART

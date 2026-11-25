@@ -12,8 +12,8 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 /**
- * Driver pendukung loading dipilih langsung saat membuat trip request
- * (khusus trip dengan bantuan loading, mis. departemen Purchasing).
+ * Muat barang kini aktivitas internal kantor: penugasan driver pendukung
+ * loading dihapus dari alur muat barang dan payload driver diabaikan.
  */
 class TripRequestLoadingSupportSelectionTest extends TestCase
 {
@@ -70,10 +70,11 @@ class TripRequestLoadingSupportSelectionTest extends TestCase
         ], $overrides);
     }
 
-    public function test_creates_loading_support_assignments_for_selected_standby_drivers(): void
+    public function test_cargo_trip_accepts_any_driver_selected(): void
     {
+        // Muat barang: supir siapa saja (status apa pun) bisa ikut muat.
         $driverA = $this->makeDriver('Support A');
-        $driverB = $this->makeDriver('Support B');
+        $driverB = $this->makeDriver('Busy Support', Driver::STATUS_ASSIGNED);
 
         $response = $this->actingAs($this->employee())
             ->post(route('trips.store'), $this->validPayload([
@@ -100,38 +101,59 @@ class TripRequestLoadingSupportSelectionTest extends TestCase
             'driver_id' => $driverA->id,
             'status' => 'PENDING',
         ]);
+
+        // Trip muat barang tidak pernah masuk WAITING_DRIVER.
+        $this->assertNotSame(TripRequest::STATUS_WAITING_DRIVER, $trip->status);
     }
 
-    public function test_rejects_support_driver_that_is_not_standby(): void
+    public function test_cargo_trip_saved_without_any_driver(): void
     {
-        $busy = $this->makeDriver('Busy Support', Driver::STATUS_ASSIGNED);
-
         $response = $this->actingAs($this->employee())
-            ->post(route('trips.store'), $this->validPayload([
-                'loading_support_driver_ids' => [$busy->id],
-            ]));
+            ->post(route('trips.store'), $this->validPayload());
 
-        $response->assertSessionHasErrors(['loading_support_driver_ids']);
-        $this->assertStringContainsString(
-            'Standby',
-            session('errors')->get('loading_support_driver_ids')[0]
-        );
+        $response->assertSessionHasNoErrors();
+        $response->assertRedirect();
+
+        $trip = TripRequest::latest('id')->first();
+        $this->assertNull($trip->assigned_driver_id);
+        $this->assertDatabaseCount('trip_assignments', 0);
     }
 
-    public function test_rejects_support_driver_that_is_unwilling_to_load(): void
+    public function test_support_drivers_still_work_for_non_cargo_trip(): void
     {
-        $unwilling = $this->makeDriver('Pemalas', Driver::STATUS_STANDBY, false);
+        // Fitur penugasan loading tetap utuh untuk trip non-muat-barang
+        // (dengan bantuan loading).
+        $driverA = $this->makeDriver('Support A');
+        $driverB = $this->makeDriver('Support B');
 
         $response = $this->actingAs($this->employee())
-            ->post(route('trips.store'), $this->validPayload([
-                'loading_support_driver_ids' => [$unwilling->id],
+            ->post(route('trips.store'), array_merge($this->validPayload(), [
+                'request_type' => TripRequest::TYPE_BUSINESS_TRIP,
+                'cargo_pickup_location' => null,
+                'cargo_description' => null,
+                'loading_support_driver_ids' => [$driverA->id, $driverB->id],
             ]));
 
-        $response->assertSessionHasErrors(['loading_support_driver_ids']);
-        $this->assertStringContainsString(
-            'bersedia membantu loading',
-            session('errors')->get('loading_support_driver_ids')[0]
-        );
+        $response->assertSessionHasNoErrors();
+        $response->assertRedirect();
+
+        $trip = TripRequest::latest('id')->first();
+
+        $this->assertDatabaseHas('trip_assignments', [
+            'trip_request_id' => $trip->id,
+            'driver_id' => $driverA->id,
+            'role' => TripAssignment::ROLE_LOADING_SUPPORT,
+        ]);
+        $this->assertDatabaseHas('trip_assignments', [
+            'trip_request_id' => $trip->id,
+            'driver_id' => $driverB->id,
+            'role' => TripAssignment::ROLE_LOADING_SUPPORT,
+        ]);
+        $this->assertDatabaseHas('loading_requests', [
+            'trip_request_id' => $trip->id,
+            'driver_id' => $driverA->id,
+            'status' => 'PENDING',
+        ]);
     }
 
     public function test_rejects_support_drivers_without_loading_assistance_flag(): void
@@ -139,7 +161,10 @@ class TripRequestLoadingSupportSelectionTest extends TestCase
         $driver = $this->makeDriver('Support Tanpa Flag');
 
         $response = $this->actingAs($this->employee())
-            ->post(route('trips.store'), $this->validPayload([
+            ->post(route('trips.store'), array_merge($this->validPayload(), [
+                'request_type' => TripRequest::TYPE_BUSINESS_TRIP,
+                'cargo_pickup_location' => null,
+                'cargo_description' => null,
                 'requires_loading_assistance' => false,
                 'loading_support_driver_ids' => [$driver->id],
             ]));

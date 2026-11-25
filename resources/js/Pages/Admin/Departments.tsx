@@ -22,6 +22,8 @@ interface Props {
     users: UserOption[];
 }
 
+const AUTO_APPROVED_DEPARTMENT_CODE = 'BOD';
+
 export default function AdminDepartments({ departments, users }: Props) {
     const columns = [
         { key: 'code', label: 'Kode' },
@@ -53,15 +55,28 @@ export default function AdminDepartments({ departments, users }: Props) {
 
     const userOptions = users.map((u) => ({ value: String(u.id), label: u.name }));
 
-    const formFields: any[] = [
+    const isBod = (dept: Department | null) => dept?.code === AUTO_APPROVED_DEPARTMENT_CODE;
+
+    const baseFormFields: any[] = [
         { name: 'code', label: 'Kode', type: 'text', required: true },
         { name: 'name', label: 'Nama Departemen', type: 'text', required: true },
         { name: 'head_name', label: 'Nama Kepala', type: 'text' },
         { name: 'notes', label: 'Catatan', type: 'textarea' },
     ];
 
+    const bodDateTimeFields: any[] = [
+        { name: 'effective_date', label: 'Tanggal Berlaku', type: 'date', required: true },
+        { name: 'effective_time', label: 'Waktu Berlaku', type: 'text', required: true },
+    ];
+
+    const formFields: any[] = [
+        ...baseFormFields,
+        ...bodDateTimeFields,
+    ];
+
     const editFormFields: any[] = [
-        ...formFields,
+        ...baseFormFields,
+        ...bodDateTimeFields,
         {
             name: 'user_ids',
             label: 'User Departemen',
@@ -81,14 +96,14 @@ export default function AdminDepartments({ departments, users }: Props) {
                         data={departments}
                         columns={columns}
                     searchPlaceholder="Cari departemen (kode/nama)... (tekan /)"
-                        emptyMessage="Tidak ada departemen"
-                        resourceName="Departemen"
-                        formFields={formFields}
-                        editFormFields={editFormFields}
-                        renderActions={renderActions}
-                        storeRoute={route('admin.departments.store')}
-                        updateRoute={(row) => route('admin.departments.update', row.id)}
-                        deleteRoute={(row) => route('admin.departments.destroy', row.id)}
+                    emptyMessage="Tidak ada departemen"
+                    resourceName="Departemen"
+                    formFields={formFields}
+                    editFormFields={editFormFields}
+                    renderActions={renderActions}
+                    storeRoute={route('admin.departments.store')}
+                    updateRoute={(row) => route('admin.departments.update', row.id)}
+                    deleteRoute={(row) => route('admin.departments.destroy', row.id)}
                     />
                 </div>
             </div>

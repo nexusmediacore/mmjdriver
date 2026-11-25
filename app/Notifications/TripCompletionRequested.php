@@ -31,6 +31,7 @@ class TripCompletionRequested extends Notification
             'message' => "Pengajuan selesai perjalanan {$this->trip->trip_number} menunggu persetujuan Anda.",
             'destination' => $this->trip->destination,
             'submitted_by' => $this->submittedByName,
+            'url' => '/trips/'.$this->trip->id,
             'notes' => $this->notes,
             'created_at' => now()->toDateTimeString(),
         ];

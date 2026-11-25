@@ -17,8 +17,15 @@ class LoadingRequest extends Model
 
     const STATUS_CANCELLED = 'CANCELLED';
 
+    const APPROVAL_PENDING = 'PENDING';
+
+    const APPROVAL_APPROVED = 'APPROVED';
+
+    const APPROVAL_REJECTED = 'REJECTED';
+
     protected $fillable = [
         'trip_request_id', 'driver_id', 'status', 'notes',
+        'approval_status', 'approved_by', 'approved_at', 'approval_note',
     ];
 
     public function tripRequest()
@@ -29,5 +36,10 @@ class LoadingRequest extends Model
     public function driver()
     {
         return $this->belongsTo(Driver::class);
+    }
+
+    public function approvedBy()
+    {
+        return $this->belongsTo(User::class, 'approved_by');
     }
 }

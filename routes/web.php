@@ -30,9 +30,9 @@ Route::middleware('auth')->group(function () {
     // Trip Routes
     Route::get('/trips', [TripController::class, 'index'])->name('trips.index');
     Route::get('/trips/create', [TripController::class, 'create'])->name('trips.create');
+    Route::post('/trips', [TripController::class, 'store'])->name('trips.store');
     Route::get('/trips/{trip}/edit', [TripController::class, 'edit'])->name('trips.edit');
     Route::put('/trips/{trip}', [TripController::class, 'update'])->name('trips.update');
-    Route::post('/trips', [TripController::class, 'store'])->name('trips.store');
     Route::get('/trips/{trip}', [TripController::class, 'show'])->name('trips.show');
     Route::post('/trips/{trip}/submit', [TripController::class, 'submit'])->name('trips.submit');
     Route::post('/trips/{trip}/approve', [TripController::class, 'approve'])->name('trips.approve');
@@ -40,6 +40,10 @@ Route::middleware('auth')->group(function () {
     Route::post('/trips/{trip}/assign-driver', [TripController::class, 'assignDriver'])->name('trips.assign-driver');
     Route::post('/trips/{trip}/driver-response', [TripController::class, 'driverResponse'])->name('trips.driver-response');
     Route::post('/trips/{trip}/start', [TripController::class, 'startTrip'])->name('trips.start');
+
+    // Persetujuan Superadmin untuk driver bantu muat (muat barang)
+    Route::post('/trips/{trip}/loading-approval', [TripController::class, 'loadingApproval'])
+        ->name('trips.loading-approval');
     // Pengakhiran perjalanan langsung oleh driver / pemohon (tanpa approval)
     Route::post('/trips/{trip}/complete', [TripController::class, 'submitCompletion'])->name('trips.complete');
     Route::delete('/trips/{trip}', [TripController::class, 'destroy'])->name('trips.destroy');

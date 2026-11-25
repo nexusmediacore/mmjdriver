@@ -128,6 +128,6 @@ class ReportController extends Controller
             'dateTo' => $dateTo,
         ]);
 
-        return $pdf->stream('laporan-perjalanan-'.$dateFrom.'-to-'.$dateTo.'.pdf');
+        return $pdf->download('laporan-perjalanan-'.$dateFrom.'-to-'.$dateTo.'.pdf');
     }
 }

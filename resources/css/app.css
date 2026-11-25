@@ -621,3 +621,34 @@ a.mmj-stat:focus-visible, .mmj-stat-link:focus-visible {
     100% { opacity: 1; transform: translateY(0) scale(1); }
 }
 .mmj-page-in { animation: page-in 450ms cubic-bezier(0.22,1,0.36,1) both; }
+/* ====== Print layout for recap pages ====== */
+@media print {
+    body, html {
+        background: #fff !important;
+    }
+    /* Sembunyikan elemen UI yang tidak perlu saat print */
+    .print\:hidden { display: none !important; }
+    .mmj-topbar,
+    .mmj-sidebar,
+    aside,
+    nav {
+        display: none !important;
+    }
+    main {
+        overflow: visible !important;
+        padding: 0 !important;
+    }
+    .mmj-page-in {
+        animation: none !important;
+        padding: 0 !important;
+    }
+    table {
+        page-break-inside: auto;
+    }
+    tr {
+        page-break-inside: avoid;
+    }
+    thead {
+        display: table-header-group;
+    }
+}

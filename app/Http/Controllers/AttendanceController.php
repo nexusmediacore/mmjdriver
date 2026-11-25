@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Requests\DriverAttendanceRequest;
 use App\Models\Driver;
 use App\Models\DriverAttendance;
+use App\Services\AttendanceRecapService;
 use App\Services\DriverAttendanceService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -140,6 +141,7 @@ class AttendanceController extends Controller
 
     /**
      * Rekap absensi (Admin, Superadmin, Dispatcher).
+     * Mendukung mode daily / weekly / monthly / yearly + anchor tanggal.
      */
     protected function recap(Request $request): Response
     {
@@ -148,32 +150,35 @@ class AttendanceController extends Controller
             403
         );
 
-        $date = $request->query('date');
-        $date = $date ? Carbon::parse($date)->toDateString() : Carbon::today()->toDateString();
+        $mode = $request->query('mode', AttendanceRecapService::MODE_DAILY);
+        if (! array_key_exists($mode, AttendanceRecapService::modes())) {
+            $mode = AttendanceRecapService::MODE_DAILY;
+        }
 
-        $attendances = DriverAttendance::with('driver.user')
-            ->whereDate('date', $date)
-            ->orderBy('clock_in_at')
-            ->get()
-            ->map(fn (DriverAttendance $a) => $this->formatAttendance($a));
+        $anchor = $request->query('anchor');
+        $anchor = $anchor ? Carbon::parse($anchor)->toDateString() : Carbon::today()->toDateString();
 
-        $drivers = Driver::with('user')->orderBy('id')->get();
+        $recapService = app(AttendanceRecapService::class);
+        [$start, $end, $label] = $recapService->range($mode, $anchor);
 
-        $driversOnTripCount = $drivers->filter(fn (Driver $d) => $d->isOnTrip())->count();
-        $lateCount = $attendances->where('is_late', true)->count();
-        $onTimeCount = $attendances->where('clock_in_at', '!=', null)->where('is_late', false)->count();
+        $rows = $recapService->rows($mode, $anchor);
+        $summary = $recapService->summary($mode, $anchor);
 
         return Inertia::render('Admin/DriverAttendances', [
-            'date' => $date,
-            'attendances' => $attendances,
+            'mode' => $mode,
+            'anchor' => $anchor,
+            'period_label' => $label,
+            'period_start' => $start->toDateString(),
+            'period_end' => $end->toDateString(),
+            'rows' => $rows,
             'summary' => [
-                'total_drivers' => $drivers->count(),
-                'present' => $attendances->where('clock_in_at', '!=', null)->count(),
-                'on_time' => $onTimeCount,
-                'late' => $lateCount,
-                'clocked_out' => $attendances->where('clock_out_at', '!=', null)->count(),
-                'on_trip' => $driversOnTripCount,
-                'absent' => max(0, $drivers->count() - $attendances->where('clock_in_at', '!=', null)->count()),
+                'total_drivers' => $summary['total_drivers'],
+                'present' => $summary['present'],
+                'on_time' => $summary['present'] - $summary['late'],
+                'late' => $summary['late'],
+                'clocked_out' => $summary['clocked_out'],
+                'on_trip' => Driver::with('user')->get()->filter(fn (Driver $d) => $d->isOnTrip())->count(),
+                'absent' => max(0, $summary['total_drivers'] - count($rows)),
             ],
             'office' => [
                 'latitude' => DriverAttendanceService::OFFICE_LATITUDE,

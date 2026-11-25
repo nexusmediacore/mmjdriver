@@ -12,7 +12,20 @@ class StoreTripRequest extends FormRequest
     {
         $user = $this->user();
 
-        return $user && $user->role && in_array($user->role->name, ['SUPERADMIN', 'ADMIN', 'EMPLOYEE']);
+        if (! $user || ! $user->role) {
+            return false;
+        }
+
+        $role = $user->role->name;
+
+        // Driver hanya boleh membuat pengajuan khusus BOD.
+        if ($role === 'DRIVER') {
+            $departmentId = $this->input('department_id') ?: $user->department_id;
+
+            return Department::isBod((int) $departmentId);
+        }
+
+        return in_array($role, ['SUPERADMIN', 'ADMIN', 'EMPLOYEE']);
     }
 
     public function rules(): array
@@ -37,8 +50,8 @@ class StoreTripRequest extends FormRequest
             'passenger_count' => 'required|integer|min:1|max:50',
             'requires_loading_assistance' => 'sometimes|boolean',
             // Driver pendukung loading (bisa lebih dari satu) yang dipilih
-            // langsung saat membuat trip request. Hanya driver STANDBY yang
-            // bersedia membantu loading yang boleh dipilih.
+            // langsung saat membuat trip request. Boleh dari status apa
+            // pun (tidak wajib STANDBY) — khusus mode muat barang.
             'loading_support_driver_ids' => 'nullable|array|max:10',
             'loading_support_driver_ids.*' => 'integer|distinct|exists:drivers,id',
             'notes' => 'nullable|string',
@@ -86,9 +99,27 @@ class StoreTripRequest extends FormRequest
 
         if ($role === 'SUPERADMIN') {
             $rules['department_id'] = 'required|integer|exists:departments,id';
+        } elseif ($role === 'DRIVER') {
+            // Driver hanya dapat membuat trip BOD: department_id wajib
+            // (divalidasi di withValidator harus departemen BOD),
+            // driver_id diatur di blok BOD di atas (required untuk BOD).
+            $rules['department_id'] = 'required|integer|exists:departments,id';
+            if (! $this->isBodRequest()) {
+                $rules['driver_id'] = 'prohibited';
+            }
         } else {
             $rules['department_id'] = 'prohibited';
             $rules['driver_id'] = 'prohibited';
+        }
+
+        // Mode muat barang (CARGO_PICKUP) Purchasing: tanpa informasi
+        // perjalanan — hanya info barang. Kolom waktu perjalanan dibuat
+        // opsional agar tidak wajib diisi.
+        if ($this->input('request_type') === 'CARGO_PICKUP') {
+            $rules['departure_time'] = 'nullable|date';
+            $rules['destination'] = 'nullable|string|max:255';
+            $rules['purpose'] = 'nullable|string';
+            $rules['passenger_count'] = 'nullable|integer|min:1|max:50';
         }
 
         return $rules;
@@ -120,12 +151,34 @@ class StoreTripRequest extends FormRequest
     {
         $validator->after(function ($validator) {
             $user = $this->user();
+            $role = $user?->role?->name;
 
-            if ($user && $user->role?->name !== 'SUPERADMIN' && ! $user->department_id) {
+            if ($user && $role !== 'SUPERADMIN' && ! $user->department_id) {
                 $validator->errors()->add(
                     'department_id',
                     'Akun Anda belum memiliki departemen. Hubungi administrator untuk mengatur departemen pada akun ini.'
                 );
+            }
+
+            // Driver hanya boleh membuat trip BOD untuk departemen BOD,
+            // dan hanya boleh memilih diri sendiri sebagai driver.
+            if ($role === 'DRIVER') {
+                $departmentId = $this->input('department_id') ?: $user->department_id;
+                if (! $departmentId || ! Department::isBod((int) $departmentId)) {
+                    $validator->errors()->add(
+                        'department_id',
+                        'Driver hanya dapat mengajukan perjalanan untuk departemen Board of Directors (BOD).'
+                    );
+                }
+
+                $driverId = $this->input('driver_id');
+                $driver = Driver::where('user_id', $user->id)->first();
+                if ($driver && $driverId && (int) $driverId !== $driver->id) {
+                    $validator->errors()->add(
+                        'driver_id',
+                        'Driver hanya boleh memilih diri sendiri sebagai driver perjalanan BOD.'
+                    );
+                }
             }
 
             $ids = collect($this->input('loading_support_driver_ids', []))
@@ -148,19 +201,10 @@ class StoreTripRequest extends FormRequest
 
             $drivers = Driver::whereIn('id', $ids)->get();
 
-            $notStandby = $drivers->filter(fn ($driver) => $driver->status !== Driver::STATUS_STANDBY);
-            if ($notStandby->isNotEmpty()) {
+            if ($drivers->count() !== $ids->count()) {
                 $validator->errors()->add(
                     'loading_support_driver_ids',
-                    'Semua driver pendukung loading harus berstatus Standby.'
-                );
-            }
-
-            $unwilling = $drivers->filter(fn ($driver) => ! $driver->willing_to_load);
-            if ($unwilling->isNotEmpty()) {
-                $validator->errors()->add(
-                    'loading_support_driver_ids',
-                    'Semua driver pendukung loading harus bersedia membantu loading.'
+                    'Sebagian driver yang dipilih tidak valid.'
                 );
             }
         });

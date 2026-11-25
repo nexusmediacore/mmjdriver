@@ -26,6 +26,11 @@ interface Trip {
     requires_loading_assistance: boolean;
     notes: string | null;
     status: string;
+    loading_approval_status?: string;
+    loading_approval_note?: string | null;
+    loading_approved_by_name?: string | null;
+    loading_approved_at?: string | null;
+    can_loading_approval?: boolean;
     created_at: string;
     approved_at: string | null;
     rejection_reason: string | null;
@@ -123,7 +128,7 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
     return (
         <div className="border-b border-gray-100 py-3 sm:grid sm:grid-cols-3 sm:gap-4">
             <dt className="text-sm font-medium text-gray-500">{label}</dt>
-            <dd className="mt-1 text-sm text-gray-900 sm:col-span-2 sm:mt-0">{value || '-'}</dd>
+            <dd className="mt-1 text-base font-semibold text-gray-900 sm:col-span-2 sm:mt-0">{value || '-'}</dd>
         </div>
     );
 }
@@ -145,6 +150,8 @@ export default function TripsShow({ trip, drivers, vehicles }: Props) {
     const [selectedVehicleId, setSelectedVehicleId] = useState<number | null>(null);
     // Driver pendukung loading (feature multi-driver Purchasing)
     const [additionalDriverIds, setAdditionalDriverIds] = useState<number[]>([]);
+    // Persetujuan Superadmin untuk driver bantu muat
+    const [loadingApprovalNote, setLoadingApprovalNote] = useState('');
 
     const formatDateTime = (value: string | null) => {
         if (!value) return null;
@@ -156,12 +163,14 @@ export default function TripsShow({ trip, drivers, vehicles }: Props) {
     };
 
     const isDraft = trip.status === 'DRAFT';
-    const canSubmit = isDraft && (trip.requestor?.id === auth?.id || ['SUPERADMIN', 'ADMIN'].includes(role || ''));
+    const canSubmit = isDraft && ['SUPERADMIN', 'ADMIN'].includes(role || '');
     const canApprove = trip.status === 'WAITING_APPROVAL' && ['SUPERADMIN', 'ADMIN', 'APPROVER'].includes(role || '');
     const isAssignedDriver = trip.assignment?.driver?.user?.name === auth?.name;
     const canDriverRespond = trip.status === 'DRIVER_ASSIGNED' && (role === 'DRIVER' || isAssignedDriver);
     const canStart = ['DRIVER_ACCEPTED', 'READY_TO_DEPART'].includes(trip.status) && (role === 'DRIVER' || isAssignedDriver);
     const canComplete = trip.can_submit_completion;
+    // Persetujuan driver bantu muat — hanya Superadmin.
+    const canApproveLoading = Boolean(trip.can_loading_approval) && role === 'SUPERADMIN';
     // Multi-driver hanya untuk trip yang membutuhkan bantuan loading.
     const canAssignMultipleDrivers = Boolean(trip.requires_loading_assistance);
     const toggleAdditionalDriver = (driverId: number) => {
@@ -374,6 +383,7 @@ export default function TripsShow({ trip, drivers, vehicles }: Props) {
                         </div>
 
                         <div className="space-y-6">
+                            {trip.request_type !== 'CARGO_PICKUP' && (
                             <div className="rounded-lg bg-white p-6 shadow">
                                 <h3 className="mb-4 text-lg font-semibold text-gray-900">Driver & Kendaraan</h3>
                                 <dl>
@@ -405,6 +415,7 @@ export default function TripsShow({ trip, drivers, vehicles }: Props) {
                                     </div>
                                 )}
                             </div>
+                            )}
 
                             {trip.assignments.length > 0 && (
                                 <div className="rounded-lg bg-white p-6 shadow">
@@ -434,7 +445,67 @@ export default function TripsShow({ trip, drivers, vehicles }: Props) {
                             <div className="rounded-lg bg-white p-6 shadow">
                                 <h3 className="mb-4 text-lg font-semibold text-gray-900">Aksi</h3>
                                 <div className="space-y-3">
-                                    {trip.status === 'WAITING_DRIVER' && ['SUPERADMIN', 'ADMIN', 'DISPATCHER'].includes(role || '') && (
+                                    {canApproveLoading && (
+                                        <div className="rounded-lg border border-[#DDD6FE] bg-[#F5F0FF] p-4">
+                                            <p className="text-sm font-semibold text-[#6D28D9]">
+                                                Persetujuan Driver Bantu Muat
+                                            </p>
+                                            <p className="mt-1 text-xs text-[#7C3AED]">
+                                                Trip memilih driver bantu muat dan menunggu persetujuan Anda (SuperAdmin).
+                                            </p>
+                                            <textarea
+                                                rows={2}
+                                                value={loadingApprovalNote}
+                                                onChange={(e) => setLoadingApprovalNote(e.target.value)}
+                                                className="mt-2 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-indigo-500"
+                                                placeholder="Catatan persetujuan (opsional)"
+                                            />
+                                            <div className="mt-2 flex gap-2">
+                                                <button
+                                                    onClick={() =>
+                                                        router.post(
+                                                            route('trips.loading-approval', trip.id),
+                                                            { decision: 'approve', note: loadingApprovalNote },
+                                                            { preserveScroll: true, onSuccess: () => setLoadingApprovalNote('') }
+                                                        )
+                                                    }
+                                                    className="flex-1 rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700"
+                                                >
+                                                    Setujui Driver Bantu Muat
+                                                </button>
+                                                <button
+                                                    onClick={() =>
+                                                        router.post(
+                                                            route('trips.loading-approval', trip.id),
+                                                            { decision: 'reject', note: loadingApprovalNote },
+                                                            { preserveScroll: true, onSuccess: () => setLoadingApprovalNote('') }
+                                                        )
+                                                    }
+                                                    className="flex-1 rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700"
+                                                >
+                                                    Tolak
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {trip.loading_approval_status && trip.loading_approval_status !== 'NONE' && (
+                                        <div className="rounded-lg bg-[#F1F5F9] p-3 text-xs">
+                                            <span className="font-semibold text-[#334155]">
+                                                Status Driver Bantu Muat: {trip.loading_approval_status}
+                                            </span>
+                                            {trip.loading_approved_at && (
+                                                <p className="mt-1 text-[#64748B]">
+                                                    Diproses oleh {trip.loading_approved_by_name ?? '-'} pada {formatDateTime(trip.loading_approved_at ?? null)}
+                                                </p>
+                                            )}
+                                            {trip.loading_approval_note && (
+                                                <p className="mt-1 text-[#64748B]">Catatan: {trip.loading_approval_note}</p>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {trip.status === 'WAITING_DRIVER' && trip.request_type !== 'CARGO_PICKUP' && ['SUPERADMIN', 'ADMIN', 'DISPATCHER'].includes(role || '') && (
                                         <button
                                             onClick={() => setShowAssignModal(true)}
                                             className="w-full rounded-md bg-[#2563EB] px-4 py-2 text-sm font-medium text-white hover:bg-[#1D4ED8]"

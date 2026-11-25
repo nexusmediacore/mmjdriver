@@ -29,6 +29,7 @@ class TripCompletionApproved extends Notification
             'message' => "Penyelesaian perjalanan {$this->trip->trip_number} telah disetujui. Perjalanan resmi selesai.",
             'destination' => $this->trip->destination,
             'completed_at' => $this->trip->completed_at ? $this->trip->completed_at->toDateTimeString() : null,
+            'url' => '/trips/'.$this->trip->id,
             'created_at' => now()->toDateTimeString(),
         ];
     }

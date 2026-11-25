@@ -25,6 +25,7 @@ class TripApproved extends Notification
             'message' => "Permintaan perjalanan {$this->trip->trip_number} telah disetujui.",
             'destination' => $this->trip->destination,
             'priority' => $this->trip->priority,
+            'url' => '/trips/'.$this->trip->id,
             'created_at' => now()->toDateTimeString(),
         ];
     }

@@ -36,6 +36,7 @@ class DriverAssigned extends Notification
                 ? Carbon::parse($this->trip->departure_time)->format('Y-m-d H:i:s')
                 : null,
             'bod_link' => $this->trip->bod_link,
+            'url' => '/trips/'.$this->trip->id,
             'created_at' => now()->toDateTimeString(),
         ];
     }

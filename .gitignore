@@ -28,3 +28,6 @@ Thumbs.db
 *.zip
 /mobile/
 /live_backup/
+/live_backup_nov25/
+deploy-domainesia.mjs
+test-output.txt

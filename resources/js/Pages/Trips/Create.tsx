@@ -38,6 +38,7 @@ interface FormData {
     loading_support_driver_ids: number[];
     bod_link: string;
     notes: string;
+    bod_departure_time: string;
     passengers: Passenger[];
 }
 
@@ -110,6 +111,7 @@ export default function TripsCreate({ departments, employees, drivers }: Props) 
         loading_support_driver_ids: [],
         bod_link: '',
         notes: '',
+        bod_departure_time: '',
         passengers: [
             { name: auth?.name || '', phone: auth?.phone || '', department: auth?.department?.name || '', position: '' },
         ],
@@ -118,6 +120,8 @@ export default function TripsCreate({ departments, employees, drivers }: Props) 
     const isGuestPickup = data.request_type === 'GUEST_PICKUP';
     const isCargoPickup = data.request_type === 'CARGO_PICKUP';
     const isSuperAdmin = auth?.role?.name === 'SUPERADMIN';
+    // Driver hanya dapat membuat pengajuan khusus BOD.
+    const isDriver = auth?.role?.name === 'DRIVER';
     const isBodDepartment = useMemo(
         () => departments.some(
             (d) => d.code === AUTO_APPROVED_DEPARTMENT_CODE && String(d.id) === String(data.department_id)
@@ -128,6 +132,12 @@ export default function TripsCreate({ departments, employees, drivers }: Props) 
         () => requestTypes.find((t) => t.value === data.request_type) ?? requestTypes[0],
         [data.request_type]
     );
+
+    // Driver hanya boleh membuat pengajuan khusus BOD: jenis perjalanan
+    // dinas reguler & jemput tamu disembunyikan dari pilihan.
+    const availableRequestTypes = isDriver
+        ? requestTypes.filter((t) => t.value === 'BUSINESS_TRIP')
+        : requestTypes;
 
     const switchType = (type: RequestType) => {
         setData((prev) => ({
@@ -167,6 +177,14 @@ export default function TripsCreate({ departments, employees, drivers }: Props) 
         // Keep passenger_count in sync with the actual passengers entered
         setData('passenger_count', Math.max(1, data.passengers.filter((p) => p.name.trim()).length));
 
+        // Departemen pemohon (BOD): gabungkan tanggal + jam keberangkatan
+        // menjadi departure_time yang disimpan ke database.
+        if (isBodDepartment) {
+            setData('departure_time', data.bod_departure_time
+                ? `${data.trip_date} ${data.bod_departure_time}:00`
+                : '');
+        }
+
         // Untuk Admin Departemen, prioritas final tidak dikirim (tetap Normal);
         // yang dikirim adalah usulan + alasan urgensinya.
         post(route('trips.store'), {
@@ -174,6 +192,9 @@ export default function TripsCreate({ departments, employees, drivers }: Props) 
             onError: () => {},
         });
     };
+
+    // Mode muat barang: hanya info barang — tanpa informasi perjalanan.
+    const isCargoMode = isCargoPickup && !isBodDepartment;
 
     return (
         <AuthenticatedLayout header="Buat Permintaan">
@@ -211,7 +232,7 @@ export default function TripsCreate({ departments, employees, drivers }: Props) 
                             }
                         >
                             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                                {requestTypes.map((type) => {
+                                {availableRequestTypes.map((type) => {
                                     const active = data.request_type === type.value;
                                     return (
                                         <button
@@ -321,6 +342,44 @@ export default function TripsCreate({ departments, employees, drivers }: Props) 
                                             <p className="mt-1.5 text-xs text-[#94A3B8]">
                                                 Trip langsung dikirim ke WhatsApp driver yang dipilih —
                                                 driver tidak perlu melakukan konfirmasi assignment lagi.
+                                            </p>
+                                        </div>
+                                    )}
+
+                                    {isBodDepartment && (
+                                        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                                            <div>
+                                                <label className="mmx-label">
+                                                    Tanggal Keberangkatan <span className="text-red-500">*</span>
+                                                </label>
+                                                <input
+                                                    type="date"
+                                                    value={data.trip_date}
+                                                    onChange={(e) => setData('trip_date', e.target.value)}
+                                                    className={inputCls(errors.trip_date)}
+                                                    required
+                                                />
+                                                {errors.trip_date && (
+                                                    <p className="mt-1 text-xs text-red-600">{errors.trip_date}</p>
+                                                )}
+                                            </div>
+                                            <div>
+                                                <label className="mmx-label">
+                                                    Jam Keberangkatan <span className="text-red-500">*</span>
+                                                </label>
+                                                <input
+                                                    type="time"
+                                                    value={data.bod_departure_time}
+                                                    onChange={(e) => setData('bod_departure_time', e.target.value)}
+                                                    className={inputCls(errors.departure_time)}
+                                                    required
+                                                />
+                                                {errors.departure_time && (
+                                                    <p className="mt-1 text-xs text-red-600">{errors.departure_time}</p>
+                                                )}
+                                            </div>
+                                            <p className="sm:col-span-2 text-xs text-[#94A3B8]">
+                                                Tanggal dan jam keberangkatan dipakai driver sebagai acuan jadwal perjalanan.
                                             </p>
                                         </div>
                                     )}
@@ -499,12 +558,31 @@ export default function TripsCreate({ departments, employees, drivers }: Props) 
                             </Panel>
                         )}
 
+                        {/* ===== Catatan Muat Barang ===== */}
+                        {isCargoMode && (
+                            <Panel
+                                delay="mmx-d2"
+                                title="Catatan (opsional)"
+                                description="Instruksi pemuatan, kondisi barang, lokasi penyimpanan, atau keterangan tambahan"
+                                icon={<CubeIcon className="h-4 w-4" />}
+                            >
+                                <textarea
+                                    rows={3}
+                                    value={data.notes}
+                                    onChange={(e) => setData('notes', e.target.value)}
+                                    className={inputCls(errors.notes)}
+                                    placeholder="Contoh: muat pagi, barang pecah belah, simpan di gudang B"
+                                />
+                                {errors.notes && <p className="mt-1 text-xs text-red-600">{errors.notes}</p>}
+                            </Panel>
+                        )}
+
                         {/* ===== Driver Pendukung Loading (muat barang / bantuan loading) ===== */}
                         {(isCargoPickup || data.requires_loading_assistance) && !isBodDepartment && (
                             <Panel
                                 delay="mmx-d2"
-                                title="Driver Pendukung Loading (opsional)"
-                                description="Pilih satu atau beberapa driver yang ikut membantu muat barang"
+                                title="Supir yang Ikut Muat (opsional)"
+                                description="Pilih satu atau beberapa supir siapa saja yang ikut membantu muat barang"
                                 icon={<UsersIcon className="h-4 w-4" />}
                                 actions={
                                     <span className="rounded-full bg-[#F0FDF4] px-2.5 py-1 text-[0.7rem] font-semibold text-[#16A34A]">
@@ -514,37 +592,35 @@ export default function TripsCreate({ departments, employees, drivers }: Props) 
                             >
                                 <div className="space-y-3">
                                     <p className="text-xs text-[#64748B]">
-                                        Hanya driver berstatus <span className="font-semibold">Standby</span> yang bersedia membantu
-                                        loading yang dapat dipilih. Driver utama tetap ditugaskan oleh dispatcher.
+                                        Bebas pilih supir siapa saja — status apapun boleh ikut muat.
+                                        Persetujuan SuperAdmin diperlukan setelah permintaan disimpan.
                                     </p>
                                     <div className="max-h-56 space-y-1 overflow-y-auto rounded-xl border border-[#E2E8F0] p-2">
-                                        {drivers.filter((d) => d.status === 'STANDBY' && d.willing_to_load).length === 0 ? (
+                                        {drivers.length === 0 ? (
                                             <p className="px-2 py-3 text-sm text-[#94A3B8]">
-                                                Tidak ada driver Standby yang bersedia membantu loading saat ini.
+                                                Tidak ada driver tersedia saat ini.
                                             </p>
                                         ) : (
-                                            drivers
-                                                .filter((d) => d.status === 'STANDBY' && d.willing_to_load)
-                                                .map((driver) => {
-                                                    const checked = data.loading_support_driver_ids.includes(driver.id);
-                                                    return (
-                                                        <label
-                                                            key={driver.id}
-                                                            className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-[#F8FAFC]"
-                                                        >
-                                                            <input
-                                                                type="checkbox"
-                                                                checked={checked}
-                                                                onChange={() => toggleLoadingSupportDriver(driver.id)}
-                                                                className="h-4 w-4 rounded border-[#CBD5E1] text-[#2563EB] focus:ring-[#2563EB]"
-                                                            />
-                                                            <span className="flex-1">{driver.name}</span>
-                                                            <span className="rounded-full bg-[#F0FDF4] px-2 py-0.5 text-[0.65rem] font-semibold text-[#16A34A]">
-                                                                Standby
-                                                            </span>
-                                                        </label>
-                                                    );
-                                                })
+                                            drivers.map((driver) => {
+                                                const checked = data.loading_support_driver_ids.includes(driver.id);
+                                                return (
+                                                    <label
+                                                        key={driver.id}
+                                                        className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-[#F8FAFC]"
+                                                    >
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={checked}
+                                                            onChange={() => toggleLoadingSupportDriver(driver.id)}
+                                                            className="h-4 w-4 rounded border-[#CBD5E1] text-[#2563EB] focus:ring-[#2563EB]"
+                                                        />
+                                                        <span className="flex-1">{driver.name}</span>
+                                                        <span className="rounded-full bg-[#F1F5F9] px-2 py-0.5 text-[0.65rem] font-semibold text-[#64748B]">
+                                                            {driver.status}
+                                                        </span>
+                                                    </label>
+                                                );
+                                            })
                                         )}
                                     </div>
                                     {errors.loading_support_driver_ids && (
@@ -554,8 +630,8 @@ export default function TripsCreate({ departments, employees, drivers }: Props) 
                             </Panel>
                         )}
 
-                        {/* ===== Step 3: Trip information (dilewati untuk BOD) ===== */}
-                        {!isBodDepartment && <Panel
+                        {/* ===== Step 3: Trip information (dilewati untuk BOD & muat barang) ===== */}
+                        {!isBodDepartment && !isCargoMode && <Panel
                             delay="mmx-d2"
                             title={isGuestPickup ? 'Waktu & Tujuan' : 'Informasi Perjalanan'}
                             description={isGuestPickup ? 'Jadwal penjemputan dan antar' : 'Detail perjalanan dinas yang diajukan'}
@@ -806,6 +882,23 @@ export default function TripsCreate({ departments, employees, drivers }: Props) 
                                     ))}
                                 </div>
                             </Panel>
+                        )}
+
+                        {/* ===== Muat barang: catatan alur ===== */}
+                        {isCargoMode && (
+                            <div className="flex items-start gap-2.5 rounded-lg border border-[#DDD6FE] bg-[#F5F0FF] px-3.5 py-3">
+                                <CubeIcon className="mt-0.5 h-5 w-5 flex-shrink-0 text-[#8B5CF6]" />
+                                <div>
+                                    <p className="text-sm font-semibold text-[#6D28D9]">
+                                        Mode Muat Barang
+                                    </p>
+                                    <p className="mt-0.5 text-xs text-[#7C3AED]">
+                                        Informasi perjalanan tidak wajib diisi — cukup informasi barang dan
+                                        driver bantu muat. Setelah disimpan, permintaan ini menunggu persetujuan
+                                        SuperAdmin atas driver bantu muat yang dipilih.
+                                    </p>
+                                </div>
+                            </div>
                         )}
 
                         {/* ===== Usulan Prioritas & Alasan (hanya untuk Admin Departemen) ===== */}

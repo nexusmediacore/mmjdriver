@@ -253,6 +253,11 @@ class SectionController extends Controller
             'beritaAcaras' => $beritaAcaras->map(fn ($ba) => [
                 'id' => $ba->id,
                 'ba_number' => $ba->ba_number,
+                'source_type' => $ba->source_type,
+                'source' => $ba->source_type
+                    ? class_basename($ba->source_type)
+                    : ($ba->tripRequest ? 'TripRequest' : 'Manual'),
+                'auto' => $ba->source_type !== null,
                 'trip_number' => $ba->tripRequest?->trip_number,
                 'driver' => $ba->driver?->user?->name,
                 'vehicle' => $ba->vehicle ? "{$ba->vehicle->plate_number} ({$ba->vehicle->brand})" : null,
@@ -812,6 +817,14 @@ class SectionController extends Controller
             'notes' => 'nullable|string',
         ]);
 
+        // Departemen BOD: kode dan nama dikunci, tidak dapat diubah.
+        if ($request->input('code') === Department::CODE_BOD) {
+            $request->merge([
+                'code' => Department::CODE_BOD,
+                'name' => 'Board of Directors',
+            ]);
+        }
+
         $department = Department::create($request->only(['code', 'name', 'head_name', 'notes']));
 
         // Sinkronkan anggota user departemen (opsional saat pembuatan).
@@ -832,6 +845,14 @@ class SectionController extends Controller
             'user_ids' => 'nullable|array',
             'user_ids.*' => 'integer|exists:users,id',
         ]);
+
+        // Departemen BOD: kode dan nama dikunci, tidak dapat diubah.
+        if ($department->code === Department::CODE_BOD) {
+            $request->merge([
+                'code' => Department::CODE_BOD,
+                'name' => 'Board of Directors',
+            ]);
+        }
 
         $department->update($request->only(['code', 'name', 'head_name', 'notes']));
 

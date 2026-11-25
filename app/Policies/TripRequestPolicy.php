@@ -2,6 +2,7 @@
 
 namespace App\Policies;
 
+use App\Models\Department;
 use App\Models\TripRequest;
 use App\Models\User;
 use Illuminate\Auth\Access\HandlesAuthorization;
@@ -47,9 +48,23 @@ class TripRequestPolicy
         return false;
     }
 
-    public function create(User $user): bool
+    public function create(User $user, ?array $data = null): bool
     {
-        return $user->role && in_array($user->role->name, ['SUPERADMIN', 'ADMIN', 'EMPLOYEE']);
+        $role = $user->role?->name;
+
+        if (! $role) {
+            return false;
+        }
+
+        // Driver hanya boleh membuat Trip Request khusus BOD: policy
+        // menerima data request dan memeriksa departemen tujuan.
+        if ($role === 'DRIVER') {
+            $departmentId = $data['department_id'] ?? $user->department_id;
+
+            return Department::isBod((int) $departmentId);
+        }
+
+        return in_array($role, ['SUPERADMIN', 'ADMIN', 'EMPLOYEE']);
     }
 
     public function update(User $user, TripRequest $tripRequest): bool

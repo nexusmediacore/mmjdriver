@@ -20,14 +20,12 @@ interface Driver {
 interface Props {
     drivers: Driver[];
     availableUsers?: { id: number; name: string; email: string }[];
-    available_users?: { id: number; name: string; email: string }[];
 }
 
-export default function AdminDrivers({ drivers, availableUsers: initialAvailableUsers, available_users }: Props) {
-    const resolvedInitialUsers = initialAvailableUsers ?? available_users ?? [];
+export default function AdminDrivers({ drivers, availableUsers: initialAvailableUsers = [] }: Props) {
     // Daftar akun Driver siap didaftarkan diambil LANGSUNG dari server
     // (bukan dari props Inertia) agar tidak pernah basi akibat cache.
-    const [availableUsers, setAvailableUsers] = useState(resolvedInitialUsers);
+    const [availableUsers, setAvailableUsers] = useState(initialAvailableUsers);
     const [loadingUsers, setLoadingUsers] = useState(true);
 
     useEffect(() => {
@@ -61,7 +59,7 @@ export default function AdminDrivers({ drivers, availableUsers: initialAvailable
             .catch(() => {
                 if (!active) return;
                 // Cadangan: props Inertia tetap dipakai bila API gagal.
-                setAvailableUsers(resolvedInitialUsers);
+                setAvailableUsers(initialAvailableUsers);
             })
             .finally(() => {
                 if (!active) return;
@@ -73,7 +71,7 @@ export default function AdminDrivers({ drivers, availableUsers: initialAvailable
             active = false;
             window.clearTimeout(timeout);
         };
-    }, [resolvedInitialUsers]);
+    }, [initialAvailableUsers]);
 
     // Muat ulang halaman penuh — selalu membawa data terbaru dari server.
     const refreshAvailableUsers = () => window.location.reload();
@@ -228,60 +226,35 @@ export default function AdminDrivers({ drivers, availableUsers: initialAvailable
                         formFields={formFields}
                         editFormFields={editFormFields}
                         storeRoute={route('admin.drivers.store')}
-                        updateRoute={(row) => {
-                            try {
-                                return route('admin.drivers.update', row?.id);
-                            } catch {
-                                return `/admin/drivers/${row?.id}`;
-                            }
-                        }}
-                        deleteRoute={(row) => {
-                            try {
-                                return route('admin.drivers.destroy', row.id);
-                            } catch {
-                                return `/admin/drivers/${row.id}`;
-                            }
-                        }}
-                        renderActions={(row, { edit, remove }) => {
-                            const allowedVehiclesHref = (() => {
-                                try {
-                                    return route('admin.drivers.allowed-vehicles', row.id);
-                                } catch {
-                                    return `/admin/drivers/${row.id}/allowed-vehicles`;
-                                }
-                            })();
-
-                            return (
-                                <div className="flex items-center gap-2">
-                                    <button
-                                        type="button"
-                                        onClick={edit}
-                                        title="Edit status driver"
-                                        className="inline-flex items-center gap-1 rounded-lg border border-[#E2E8F0] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#334155] transition hover:border-[#BFDBFE] hover:bg-[#EFF6FF] hover:text-[#2563EB]"
-                                    >
-                                        <PencilIcon className="h-3.5 w-3.5" />
-                                        Edit
-                                    </button>
-                                    <Link
-                                        href={allowedVehiclesHref}
-                                        title="Atur izin kendaraan untuk driver"
-                                        className="inline-flex items-center gap-1 rounded-lg border border-[#E2E8F0] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#334155] transition hover:border-[#BFDBFE] hover:bg-[#EFF6FF] hover:text-[#2563EB]"
-                                    >
-                                        <KeyIcon className="h-3.5 w-3.5" />
-                                        Atur Kendaraan
-                                    </Link>
-                                    <button
-                                        type="button"
-                                        onClick={remove}
-                                        aria-label="Hapus driver"
-                                        title="Hapus driver"
-                                        className="inline-flex items-center justify-center rounded-lg border border-[#E2E8F0] bg-white p-1.5 text-[#64748B] transition hover:border-[#FECACA] hover:bg-[#FEF2F2] hover:text-[#DC2626]"
-                                    >
-                                        <TrashIcon className="h-3.5 w-3.5" />
-                                    </button>
-                                </div>
-                            );
-                        }}
+                        updateRoute={(row) => route('admin.drivers.update', row?.id)}
+                        deleteRoute={(row) => route('admin.drivers.destroy', row.id)}
+                        renderActions={(row, { edit, remove }) => (
+                            <div className="flex items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={edit}
+                                    className="inline-flex items-center gap-1 rounded-lg border border-[#E2E8F0] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#334155] transition hover:border-[#BFDBFE] hover:bg-[#EFF6FF] hover:text-[#2563EB]"
+                                >
+                                    <PencilIcon className="h-3.5 w-3.5" />
+                                    Edit
+                                </button>
+                                <Link
+                                    href={route('admin.drivers.allowed-vehicles', row.id)}
+                                    className="inline-flex items-center gap-1 rounded-lg border border-[#E2E8F0] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#334155] transition hover:border-[#BFDBFE] hover:bg-[#EFF6FF] hover:text-[#2563EB]"
+                                >
+                                    <KeyIcon className="h-3.5 w-3.5" />
+                                    Atur Kendaraan
+                                </Link>
+                                <button
+                                    type="button"
+                                    onClick={remove}
+                                    aria-label="Hapus driver"
+                                    className="inline-flex items-center justify-center rounded-lg border border-[#E2E8F0] bg-white p-1.5 text-[#64748B] transition hover:border-[#FECACA] hover:bg-[#FEF2F2] hover:text-[#DC2626]"
+                                >
+                                    <TrashIcon className="h-3.5 w-3.5" />
+                                </button>
+                            </div>
+                        )}
                     />
                 </div>
             </div>

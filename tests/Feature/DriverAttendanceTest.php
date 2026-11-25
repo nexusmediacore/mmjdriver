@@ -6,6 +6,7 @@ use App\Http\Requests\DriverAttendanceRequest;
 use App\Models\Driver;
 use App\Models\DriverAttendance;
 use App\Models\User;
+use App\Services\AttendanceRecapService;
 use App\Services\DriverAttendanceService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -245,13 +246,21 @@ class DriverAttendanceTest extends TestCase
         $admin = User::where('email', 'admin@example.com')->firstOrFail();
 
         $this->actingAs($admin)
-            ->get(route('admin.driver-attendances', ['date' => '2026-11-16']))
+            ->get(route('admin.driver-attendances', ['anchor' => '2026-11-16']))
             ->assertOk()
             ->assertInertia(fn ($page) => $page
                 ->component('Admin/DriverAttendances')
-                ->where('date', '2026-11-16')
-                ->has('attendances', 1)
-                ->has('summary'));
+                ->where('mode', 'daily')
+                ->where('anchor', '2026-11-16')
+                ->where('summary.present', 1)
+                ->has('rows'));
+
+        // Baris rekap driver bersangkutan memuat 1 record kehadiran
+        $row = collect(app(AttendanceRecapService::class)->rows('daily', '2026-11-16'))
+            ->firstWhere('driver_id', $driver->id);
+        $this->assertNotNull($row);
+        $this->assertCount(1, $row['records']);
+        $this->assertSame(1, $row['summary']['present']);
     }
 
     public function test_employee_cannot_access_attendance_recap(): void

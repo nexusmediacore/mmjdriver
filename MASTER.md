@@ -2072,6 +2072,16 @@ Catatan:
 [x] Driver terima / tolak tugas
 [x] Mulai perjalanan
 [x] Selesaikan perjalanan
+[x] Edit / perbarui trip (hanya DRAFT, oleh pemohon atau Admin/SuperAdmin;
+    SuperAdmin dapat mengedit semua field dalam status apa pun termasuk COMPLETED;
+    non-DRAFT CARGO_PICKUP oleh SuperAdmin hanya mengubah loading_support_driver_ids)
+[x] SuperAdmin edit trip non-Draft (semua field, semua status)
+[x] Loading support driver selection untuk CARGO_PICKUP non-Draft oleh SuperAdmin
+[x] Driver dapat membuat trip BOD (hanya departemen BOD, driver sendiri)
+[x] Backfill Berita Acara untuk trip COMPLETED lama (`php artisan berita-acara:backfill`)
+[x] Preview foto absensi masuk & pulang dalam modal (SuperAdmin/Admin/Dispatcher)
+[x] Driver tidak dapat submit trip request (hanya sampai DRAFT)
+[x] BoD departemen: input hanya tanggal & waktu berlaku (kode & nama terkunci)
 [x] Hapus trip (soft delete)
 [x] Deteksi konflik jadwal driver
 [x] Deteksi konflik jadwal kendaraan
@@ -2219,14 +2229,75 @@ DriverPageAccessTest, DriverMyTasksPageAccessTest, DriverMyTasksErrorTest
 ## 67.14 Belum Diimplementasikan (Gap Saat Ini)
 
 ```text
-[ ] Edit trip (route update belum ada)
 [ ] Cancel trip (service ada, route/UI belum diekspos)
 [ ] Upload attachment (tabel ada, route/UI belum ada)
 [ ] Export Excel laporan
 [ ] Realtime (Laravel Reverb/Echo)
-[ ] Pengelolaan loading request (baru dibuat, belum ada alur)
+[ ] Pengelolaan loading request (baru dibuat, belum ada alur lengkap)
 [ ] PWA / mobile app native
 ```
+
+Backfill Berita Acara untuk trip COMPLETED lama sudah tersedia via:
+`php artisan berita-acara:backfill`
+
+---
+
+## 67.15 FITUR BARU YANG BARU DIMPLEMENTASI (Terbaru)
+
+Berikut fitur yang baru ditambahkan ke sistem:
+
+```text
+1. SuperAdmin Edit Trip Semua Status
+   - SuperAdmin dapat mengedit semua field trip dalam status apa pun
+     (termasuk COMPLETED), bukan hanya DRAFT.
+   - Backend: TripController::update(), TripService::updateTrip(),
+     UpdateTripRequest::rules() (departure_time tanpa after_or_equal:now
+     untuk SuperAdmin).
+   - Frontend: Tombol edit muncul untuk SuperAdmin pada trip non-Draft
+     di Trips/Index.tsx; Trips/Edit.tsx memuat loading_support_driver_ids
+     dan bod_link dari data trip.
+
+2. Loading Support Driver Selection untuk CARGO_PICKUP Non-Draft
+   - SuperAdmin dapat mengubah loading_support_driver_ids pada trip
+     CARGO_PICKUP meski di luar status DRAFT.
+   - Audit log mencatat is_superadmin_edit.
+
+3. BoD Departemen: Input Hanya Tanggal & Waktu Berlaku
+   - Kode dan nama departemen BOD terkunci (tidak dapat diubah).
+   - Form tambah/edit departemen menambahkan effective_date dan
+     effective_time.
+   - Backend: SectionController::storeDepartment()/updateDepartment()
+     memaksa code=CODE_BOD dan name='Board of Directors'.
+
+4. Driver Tidak Dapat Submit Trip Request
+   - Employee/DRIVER tidak dapat mengajukan submit trip request;
+     trip hanya sampai status DRAFT.
+   - Backend: TripController::submit() blokir EMPLOYEE.
+   - Frontend: Trips/Show.tsx canSubmit hanya SUPERADMIN/ADMIN.
+
+5. Driver Dapat Buat Trip BOD
+   - Role DRIVER diizinkan membuat trip (hanya departemen BOD,
+     memilih diri sendiri sebagai driver).
+   - Backend: StoreTripRequest, TripRequestPolicy, TripService.
+   - Frontend: Driver/Dashboard.tsx tombol "Ajukan Perjalanan BoD".
+
+6. Backfill Berita Acara untuk Trip COMPLETED Lama
+   - Artisan command: php artisan berita-acara:backfill
+   - Membuat record Berita Acara untuk semua trip COMPLETED yang
+     belum memiliki record (idempoten).
+
+7. Preview Foto Absensi dalam Modal
+   - SuperAdmin/Admin/Dispatcher dapat melihat foto absensi masuk
+     dan pulang driver dalam modal (bukan buka tab baru).
+   - Komponen baru: resources/js/Components/PhotoPreviewModal.tsx.
+   - Diintegrasi ke Admin/DriverAttendances.tsx.
+
+8. Audit Log untuk SuperAdmin Edit Trip
+   - Setiap edit trip oleh SuperAdmin dicatat ke audit_logs dengan
+     flag is_superadmin_edit.
+```
+
+---
 
 ---
 

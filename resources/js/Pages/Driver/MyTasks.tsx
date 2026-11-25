@@ -24,7 +24,14 @@ export default function DriverMyTasks({ tasks }: Props) {
         { key: 'trip_number', label: 'No. Trip' },
         { key: 'destination', label: 'Tujuan' },
         { key: 'purpose', label: 'Keperluan' },
-        { key: 'departure_time', label: 'Berangkat' },
+        {
+            key: 'departure_time',
+            label: 'Berangkat',
+            // Timestamp lebih besar & semibold agar mudah dibaca driver.
+            render: (row: Task) => (
+                <span className="text-base font-semibold whitespace-nowrap">{row.departure_time}</span>
+            ),
+        },
         { key: 'vehicle', label: 'Kendaraan' },
         { key: 'requestor', label: 'Pemohon' },
         {

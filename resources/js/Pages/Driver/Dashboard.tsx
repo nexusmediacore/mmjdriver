@@ -119,7 +119,7 @@ export default function DriverDashboard({
                                     <div>
                                         <p className="text-xs font-semibold uppercase tracking-wide text-[#94A3B8]">Absensi Hari Ini</p>
                                         <p className="mt-1 text-sm font-semibold text-[#0F172A]">{clockStatus}</p>
-                                        <p className="mt-0.5 text-xs text-[#64748B]">
+                                        <p className="mt-0.5 text-sm font-semibold text-[#0F172A]">
                                             Masuk {attendance_today?.clock_in_at ? new Date(attendance_today.clock_in_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : '-'}
                                             {' • '}
                                             Pulang {attendance_today?.clock_out_at ? new Date(attendance_today.clock_out_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : '-'}
@@ -186,7 +186,7 @@ export default function DriverDashboard({
                                     <div key={a.id} className="flex flex-col gap-2 rounded-xl border border-[#E2E8F0] bg-white p-4 transition hover:border-[#BFDBFE] hover:shadow-[0_2px_8px_-4px_rgba(37,99,235,0.2)] sm:flex-row sm:items-center sm:justify-between">
                                         <div className="min-w-0">
                                             <p className="truncate font-semibold text-[#0F172A]">{a.trip_number}</p>
-                                            <p className="mt-0.5 truncate text-sm text-[#64748B]">{a.destination} • {a.departure_time}</p>
+                                            <p className="mt-0.5 truncate text-sm font-semibold text-[#0F172A]">{a.destination} • <span className="whitespace-nowrap">{a.departure_time}</span></p>
                                         </div>
                                         <StatusBadge status={a.status} pulse={a.status === 'ON_TRIP'} />
                                     </div>

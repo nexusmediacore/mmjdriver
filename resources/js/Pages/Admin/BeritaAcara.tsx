@@ -6,6 +6,9 @@ import { TrashIcon } from '@heroicons/react/24/outline';
 interface BeritaAcara {
     id: number;
     ba_number: string;
+    source_type?: string | null;
+    source?: string;
+    auto?: boolean;
     trip_number: string;
     driver: string;
     vehicle: string;
@@ -33,6 +36,19 @@ export default function AdminBeritaAcara({ beritaAcaras }: Props) {
     const columns = [
         { key: 'ba_number', label: 'No. BA' },
         { key: 'trip_number', label: 'No. Trip' },
+        {
+            key: 'source',
+            label: 'Sumber',
+            render: (row: BeritaAcara) => (
+                <span
+                    className={`rounded-full px-2 py-0.5 text-[0.65rem] font-semibold ${
+                        row.auto ? 'bg-[#EFF6FF] text-[#2563EB]' : 'bg-[#F1F5F9] text-[#64748B]'
+                    }`}
+                >
+                    {row.auto ? 'Otomatis' : 'Manual'}
+                </span>
+            ),
+        },
         { key: 'driver', label: 'Driver' },
         { key: 'vehicle', label: 'Kendaraan' },
         { key: 'destination', label: 'Tujuan' },

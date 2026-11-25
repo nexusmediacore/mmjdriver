@@ -25,6 +25,7 @@ class TripCreatedNotification extends Notification
             'message' => "Permintaan perjalanan baru {$this->trip->trip_number} telah dibuat.",
             'destination' => $this->trip->destination,
             'priority' => $this->trip->priority,
+            'url' => '/trips/'.$this->trip->id,
             'created_at' => now()->toDateTimeString(),
         ];
     }

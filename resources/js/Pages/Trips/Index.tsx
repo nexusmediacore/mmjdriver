@@ -53,6 +53,7 @@ const sortOptions = [
 export default function TripsIndex({ trips, sort_by = 'created_at', sort_dir = 'desc' }: Props) {
     const user = usePage().props.auth.user as { id: number; role?: { name: string } | null } | null;
     const isSuperAdmin = user?.role?.name === 'SUPERADMIN';
+    const isDriver = user?.role?.name === 'DRIVER';
     const isAdmin = ['SUPERADMIN', 'ADMIN'].includes(user?.role?.name ?? '');
     const canDelete = (trip: Trip) =>
         isAdmin || (
@@ -60,11 +61,11 @@ export default function TripsIndex({ trips, sort_by = 'created_at', sort_dir = '
             trip.requestor_id === user?.id &&
             trip.status === 'DRAFT'
         );
-    // Edit hanya tersedia selama trip masih DRAFT, oleh pemohon
-    // (atau Admin/SuperAdmin).
+    // SuperAdmin dapat mengedit trip dalam status apa pun (termasuk non-Draft);
+    // Admin dan Employee hanya dapat mengedit trip yang masih DRAFT.
+    // Driver tidak dapat mengedit trip request.
     const canEdit = (trip: Trip) =>
-        trip.status === 'DRAFT' &&
-        (isAdmin || trip.requestor_id === user?.id);
+        (isSuperAdmin || (trip.status === 'DRAFT' && (isAdmin || (trip.requestor_id === user?.id && user?.role?.name !== 'DRIVER'))));
     const [sortBy, setSortBy] = useState(sort_by ?? 'created_at');
     const [sortDir, setSortDir] = useState(sort_dir === 'asc' ? 'asc' : 'desc');
 
@@ -88,10 +89,12 @@ export default function TripsIndex({ trips, sort_by = 'created_at', sort_dir = '
             eyebrow="Perjalanan"
             description="Daftar seluruh permintaan perjalanan dinas beserta status dan prioritasnya."
             actions={
-                <Link href={route('trips.create')} className="mmj-btn mmj-btn-primary">
-                    <PlusIcon className="h-4 w-4" />
-                    Buat Permintaan
-                </Link>
+                !isDriver ? (
+                    <Link href={route('trips.create')} className="mmj-btn mmj-btn-primary">
+                        <PlusIcon className="h-4 w-4" />
+                        Buat Permintaan
+                    </Link>
+                ) : null
             }
             meta={
                 <span className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-medium text-white/80">
@@ -174,7 +177,7 @@ export default function TripsIndex({ trips, sort_by = 'created_at', sort_dir = '
                                         <td><RequestTypeBadge type={trip.request_type} /></td>
                                         <td className="max-w-[220px] truncate text-[#334155]">{trip.destination}</td>
                                         <td className="text-[#64748B]">{trip.requestor?.name || '-'}</td>
-                                        <td className="text-[#64748B]">{new Date(trip.departure_time.replace(' ', 'T')).toLocaleDateString('id-ID')}</td>
+                                        <td className="text-[#64748B]">{trip.departure_time ? new Date(trip.departure_time.replace(' ', 'T')).toLocaleDateString('id-ID') : '-'}</td>
                                         <td><StatusBadge status={trip.status} /></td>
                                         <td>
                                             <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${priorityStyles[trip.priority] ?? priorityStyles.NORMAL}`}>

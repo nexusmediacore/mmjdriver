@@ -13,7 +13,7 @@ class BeritaAcara extends Model
         'ba_number', 'trip_request_id', 'driver_id', 'vehicle_id',
         'requestor_name', 'department_name', 'destination', 'purpose',
         'departure_time', 'return_time', 'notes', 'signed_by',
-        'signed_position', 'signed_at',
+        'signed_position', 'signed_at', 'source_type', 'source_id',
     ];
 
     protected $casts = [
